@@ -220,7 +220,6 @@ class DatabaseManager:
                     "phoneNumber": u.get("phone_number"), "department": u["department"], 
                     "businessUnit": u["business_unit"], "role": u["role"], "password": u.get("password")
                 }
-                return res.data[0]
             return None
         else:
             db = SessionLocal()
@@ -232,7 +231,6 @@ class DatabaseManager:
                         "phoneNumber": u.phone_number, "department": u.department, 
                         "businessUnit": u.business_unit, "role": u.role, "password": u.password
                     }
-                    return u
                 return None
             finally:
                 db.close()
