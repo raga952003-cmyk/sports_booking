@@ -17,8 +17,14 @@ export default function NotificationBell({ employeeId }: NotificationBellProps) 
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const fetchNotifs = () => {
-    setNotifications(db.getNotifications(employeeId));
+  const fetchNotifs = async () => {
+    try {
+      const notifs = await db.getNotifications(employeeId);
+      setNotifications(notifs);
+    } catch (error) {
+      console.error('Failed to fetch notifications:', error);
+      setNotifications([]);
+    }
   };
 
   useEffect(() => {
@@ -48,10 +54,14 @@ export default function NotificationBell({ employeeId }: NotificationBellProps) 
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const handleMarkRead = (id: string, e: React.MouseEvent) => {
+  const handleMarkRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    db.markNotificationRead(id);
-    fetchNotifs();
+    try {
+      await db.markNotificationRead(id);
+      fetchNotifs();
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
   };
 
   const getIcon = (type: string) => {

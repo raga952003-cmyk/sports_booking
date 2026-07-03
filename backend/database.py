@@ -12,6 +12,14 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 # Determine if we should use Supabase or fallback to SQLite
 USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
 
+# Import email service for real email sending
+try:
+    from email_service import send_email
+    EMAIL_SERVICE_AVAILABLE = True
+except ImportError:
+    EMAIL_SERVICE_AVAILABLE = False
+    print("Warning: email_service not available. Emails will only be stored in database.")
+
 # ----------------- SQLALCHEMY FALLBACK DB MODEL SETUP -----------------
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, CheckConstraint, Index
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -1020,6 +1028,9 @@ class DatabaseManager:
                 db.close()
 
     def send_simulated_email(self, to: str, subject: str, body: str):
+        """
+        Store email in database AND optionally send real email via SMTP
+        """
         email_id = f"email_{int(datetime.datetime.now().timestamp() * 1000)}"
         new_email = {
             "id": email_id,
@@ -1029,6 +1040,7 @@ class DatabaseManager:
             "sent_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
+        # Store in database (simulated outbox)
         if USE_SUPABASE:
             supabase_client.table("simulated_emails").insert(new_email).execute()
         else:
@@ -1044,6 +1056,17 @@ class DatabaseManager:
                 db.commit()
             finally:
                 db.close()
+        
+        # Send real email via SMTP (if configured)
+        if EMAIL_SERVICE_AVAILABLE:
+            try:
+                result = send_email(to, subject, body)
+                if result.get("success"):
+                    print(f"✅ Real email sent to {to}")
+                else:
+                    print(f"⚠️ Failed to send real email: {result.get('error')}")
+            except Exception as e:
+                print(f"⚠️ Email service error: {e}")
 
     def clear_simulated_emails(self) -> bool:
         if USE_SUPABASE:
