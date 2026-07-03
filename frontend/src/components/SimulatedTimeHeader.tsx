@@ -17,8 +17,11 @@ export default function SimulatedTimeHeader() {
 
   const refreshData = async () => {
     try {
-      const time = await db.getSimulatedTime();
-      setSimTime(time);
+      // Get real current time instead of simulated time
+      const now = new Date();
+      const currentTime = { hour: now.getHours(), minute: now.getMinutes() };
+      setSimTime(currentTime);
+      
       const allEmails = await db.getSimulatedEmails();
       setEmails(allEmails);
     } catch (e) {
@@ -29,11 +32,11 @@ export default function SimulatedTimeHeader() {
   useEffect(() => {
     refreshData();
 
-    // Listen to custom event for simulated time changes
-    const handleTimeChange = async () => {
-      const time = await db.getSimulatedTime();
-      setSimTime(time);
-    };
+    // Update time every minute to show real current time
+    const timeInterval = setInterval(() => {
+      const now = new Date();
+      setSimTime({ hour: now.getHours(), minute: now.getMinutes() });
+    }, 60000); // Update every minute
 
     const handleEmailSent = async () => {
       const allEmails = await db.getSimulatedEmails();
@@ -44,27 +47,21 @@ export default function SimulatedTimeHeader() {
       }
     };
 
-    window.addEventListener('simulated_time_change', handleTimeChange);
     window.addEventListener('simulated_email_sent', handleEmailSent);
 
-    // Poll server for changes every 2.5 seconds to synchronize state across panels
-    const interval = setInterval(() => {
-      handleTimeChange();
+    // Poll server for email changes every 2.5 seconds
+    const emailInterval = setInterval(() => {
       db.getSimulatedEmails().then(allEmails => {
         setEmails(allEmails);
       }).catch(console.error);
     }, 2500);
 
     return () => {
-      window.removeEventListener('simulated_time_change', handleTimeChange);
       window.removeEventListener('simulated_email_sent', handleEmailSent);
-      clearInterval(interval);
+      clearInterval(timeInterval);
+      clearInterval(emailInterval);
     };
   }, []);
-
-  const changeTime = async (hour: number) => {
-    await db.setSimulatedTime({ hour, minute: 0 });
-  };
 
   const clearLogs = async () => {
     await db.clearSimulatedEmails();
@@ -80,27 +77,8 @@ export default function SimulatedTimeHeader() {
         <div className="flex items-center gap-2">
           <Clock className="w-4 h-4 text-sky-400 animate-pulse" />
           <span className="font-mono text-sky-300 font-semibold tracking-wider">
-            SIMULATED TIME: {db.formatSimulatedTime(simTime)}
+            CURRENT TIME: {db.formatSimulatedTime(simTime)}
           </span>
-        </div>
-        <div className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded">
-          <label htmlFor="sim_hour_select" className="text-slate-400 font-bold text-[9px] uppercase tracking-wider">Shift Hour:</label>
-          <select
-            id="sim_hour_select"
-            value={simTime.hour}
-            onChange={(e) => changeTime(parseInt(e.target.value))}
-            className="bg-transparent text-white font-mono font-bold focus:outline-none cursor-pointer text-xs"
-          >
-            {Array.from({ length: 24 }).map((_, h) => {
-              const displayHour = h % 12 || 12;
-              const suffix = h >= 12 ? 'PM' : 'AM';
-              return (
-                <option key={h} value={h} className="bg-slate-900 text-white text-[11px]">
-                  {displayHour}:00 {suffix}
-                </option>
-              );
-            })}
-          </select>
         </div>
       </div>
 
@@ -157,6 +135,7 @@ export default function SimulatedTimeHeader() {
             <li><strong className="text-amber-400">Security Booking Window (5:00 AM – 10:00 AM)</strong>: Only security staff can make bookings. Employees must enter both Employee ID and Email ID. All indirect bookings trigger confirmation emails.</li>
             <li><strong className="text-emerald-400">Employee Self Booking (10:00 AM – 8:00 PM)</strong>: Employees can book any remaining slots directly, verifying their details. All direct bookings trigger confirmation emails.</li>
             <li><strong className="text-rose-400">Operating Hour Lockouts</strong>: Security bookings are frozen outside 5:00 AM – 10:00 AM, and employee bookings are frozen outside 10:00 AM – 8:00 PM.</li>
+            <li><strong className="text-sky-400">Real-Time Clock</strong>: The system now uses your actual current time for booking windows and validation.</li>
           </ul>
         </div>
       )}

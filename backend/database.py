@@ -493,19 +493,22 @@ class DatabaseManager:
             return {"success": False, "error": f"{facility['sport']} {facility['courtName']} is under maintenance and cannot be booked."}
 
         # 3. Check booking rules & window bypass for Admins
-        sim_time = self.get_simulated_time()
+        # Use real current time instead of simulated time
+        now = datetime.datetime.now()
+        current_hour = now.hour
+        
         # Admin bypass check
         is_admin_override = employee["role"] == "admin"
         
         if not is_admin_override:
             if source == "security":
-                if sim_time["hour"] < 5 or sim_time["hour"] >= 10:
+                if current_hour < 5 or current_hour >= 10:
                     return {
                         "success": False,
                         "error": f"Security booking is frozen. The Security assisted booking window is active only from 5:00 AM to 10:00 AM."
                     }
             elif source == "online":
-                if sim_time["hour"] < 10 or sim_time["hour"] >= 20:
+                if current_hour < 10 or current_hour >= 20:
                     return {
                         "success": False,
                         "error": f"Online booking is closed. Employee Booking Window is active from 10:00 AM to 8:00 PM."
@@ -576,7 +579,7 @@ class DatabaseManager:
         # 7. Simulated SMTP dispatcher outbox email trigger
         email_to = employee["email"]
         email_subject = f"TCS PlaySmart - Slot Booking Confirmed [{booking_id}] 🏸"
-        email_body = f"Dear {employee['name']},\n\nYour sports booking request on PlaySmart has been successfully confirmed!\n\nBooking Details:\n- Booking ID: {booking_id}\n- Sport Category: {facility['sport']}\n- Court / Board: {facility['courtName']}\n- Reserved Time Slot: {slot_time}\n- Booking Channel: {source.capitalize()} Booking\n- Simulated Timestamp: {sim_time['hour']}:{str(sim_time['minute']).zfill(2)}\n\nPlease present your simulated QR Gate Pass at the court check-in checkpoint.\n\nEnjoy your active session!\n\nBest Regards,\nTCS PlaySmart Admin Team"
+        email_body = f"Dear {employee['name']},\n\nYour sports booking request on PlaySmart has been successfully confirmed!\n\nBooking Details:\n- Booking ID: {booking_id}\n- Sport Category: {facility['sport']}\n- Court / Board: {facility['courtName']}\n- Reserved Time Slot: {slot_time}\n- Booking Channel: {source.capitalize()} Booking\n- Booking Time: {now.strftime('%I:%M %p')}\n\nPlease present your simulated QR Gate Pass at the court check-in checkpoint.\n\nEnjoy your active session!\n\nBest Regards,\nTCS PlaySmart Admin Team"
         self.send_simulated_email(email_to, email_subject, email_body)
 
         # Convert back camelCase for response

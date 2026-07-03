@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
+import datetime
 
 from database import db_mgr
 
@@ -74,14 +75,12 @@ class MarkNotificationReadSchema(BaseModel):
 def read_root():
     return {"status": "online", "message": "TCS PlaySmart API Server running successfully."}
 
-# --- SIMULATED TIME ---
+# --- CURRENT TIME (Real System Time) ---
 @app.get("/api/time")
 def get_time():
-    return db_mgr.get_simulated_time()
-
-@app.post("/api/time")
-def set_time(config: TimeConfigSchema):
-    return db_mgr.set_simulated_time(config.hour, config.minute)
+    """Returns the current real system time"""
+    now = datetime.datetime.now()
+    return {"hour": now.hour, "minute": now.minute}
 
 # --- USERS ---
 @app.get("/api/users")
