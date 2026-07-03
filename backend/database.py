@@ -1,0 +1,1064 @@
+import os
+import datetime
+from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# Determine if we should use Supabase or fallback to SQLite
+USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
+
+# ----------------- SQLALCHEMY FALLBACK DB MODEL SETUP -----------------
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, CheckConstraint, Index
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+Base = declarative_base()
+
+class DBUser(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True)
+    employee_id = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    phone_number = Column(String)
+    department = Column(String, nullable=False)
+    business_unit = Column(String, nullable=False)
+    role = Column(String, nullable=False)  # employee, security, admin
+    password = Column(String, default="password")
+    created_at = Column(String, default=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+class DBFacility(Base):
+    __tablename__ = "facilities"
+    facility_id = Column(String, primary_key=True)
+    sport = Column(String, nullable=False)
+    court_name = Column(String, nullable=False)
+    status = Column(String, default="active")  # active, maintenance
+
+class DBBooking(Base):
+    __tablename__ = "bookings"
+    booking_id = Column(String, primary_key=True)
+    employee_id = Column(String, nullable=False, index=True)
+    employee_name = Column(String, nullable=False)
+    facility_id = Column(String, nullable=False)
+    sport = Column(String, nullable=False)
+    court_name = Column(String, nullable=False)
+    slot_time = Column(String, nullable=False)
+    booking_source = Column(String, nullable=False)  # online, security
+    status = Column(String, default="confirmed")  # confirmed, checked_in, no_show, cancelled
+    created_at = Column(String, default=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+class DBWaitlist(Base):
+    __tablename__ = "waitlist"
+    waitlist_id = Column(String, primary_key=True)
+    employee_id = Column(String, nullable=False)
+    employee_name = Column(String, nullable=False)
+    facility_id = Column(String, nullable=False)
+    sport = Column(String, nullable=False)
+    court_name = Column(String, nullable=False)
+    slot_time = Column(String, nullable=False)
+    created_at = Column(String, default=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+class DBNotification(Base):
+    __tablename__ = "notifications"
+    id = Column(String, primary_key=True)
+    employee_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    type = Column(String, default="info")  # info, success, warning, error
+    read = Column(Boolean, default=False)
+    created_at = Column(String, default=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+class DBSimulatedEmail(Base):
+    __tablename__ = "simulated_emails"
+    id = Column(String, primary_key=True)
+    to_email = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    body = Column(String, nullable=False)
+    sent_at = Column(String, default=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+class DBSimulatedTime(Base):
+    __tablename__ = "simulated_time"
+    key = Column(String, primary_key=True, default="current_time")
+    hour = Column(Integer, default=9)
+    minute = Column(Integer, default=0)
+
+
+# Initialize local engine & sessions
+engine = create_engine("sqlite:///playsmart_sandbox.db", connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def init_sqlite_db():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        # Seed default facilities if empty
+        if db.query(DBFacility).count() == 0:
+            facilities = [
+                DBFacility(facility_id="badminton_c1", sport="Badminton", court_name="Court 1", status="active"),
+                DBFacility(facility_id="badminton_c2", sport="Badminton", court_name="Court 2", status="active"),
+                DBFacility(facility_id="badminton_c3", sport="Badminton", court_name="Court 3", status="active"),
+                DBFacility(facility_id="basketball_c1", sport="Basketball", court_name="Court 1", status="active"),
+                DBFacility(facility_id="basketball_c2", sport="Basketball", court_name="Court 2", status="active"),
+                DBFacility(facility_id="volleyball_c1", sport="Volleyball", court_name="Court 1", status="active"),
+                DBFacility(facility_id="volleyball_c2", sport="Volleyball", court_name="Court 2", status="active"),
+                DBFacility(facility_id="tt_t1", sport="Table Tennis", court_name="Table 1", status="active"),
+                DBFacility(facility_id="tt_t2", sport="Table Tennis", court_name="Table 2", status="active"),
+                DBFacility(facility_id="carrom_b1", sport="Carrom", court_name="Board 1", status="active"),
+                DBFacility(facility_id="carrom_b2", sport="Carrom", court_name="Board 2", status="active"),
+                DBFacility(facility_id="carrom_b3", sport="Carrom", court_name="Board 3", status="active"),
+                DBFacility(facility_id="carrom_b4", sport="Carrom", court_name="Board 4", status="active"),
+                DBFacility(facility_id="carrom_b5", sport="Carrom", court_name="Board 5", status="active"),
+                DBFacility(facility_id="cricket_g1", sport="Box Cricket", court_name="Ground 1", status="active"),
+            ]
+            db.bulk_save_objects(facilities)
+            db.commit()
+            
+        # Seed default simulated time if empty
+        if db.query(DBSimulatedTime).filter_by(key="current_time").first() is None:
+            time_conf = DBSimulatedTime(key="current_time", hour=9, minute=0)
+            db.add(time_conf)
+            db.commit()
+    finally:
+        db.close()
+
+
+# ----------------- SUPABASE CLIENT SETUP -----------------
+supabase_client = None
+if USE_SUPABASE:
+    try:
+        from supabase import create_client, Client
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"Error initializing Supabase client: {e}. Falling back to SQLite.")
+        USE_SUPABASE = False
+
+if not USE_SUPABASE:
+    init_sqlite_db()
+
+
+# ----------------- DATABASE INTERFACE IMPLEMENTATION -----------------
+
+class DatabaseManager:
+    # --- SIMULATED TIME ---
+    def get_simulated_time(self) -> Dict[str, int]:
+        if USE_SUPABASE:
+            res = supabase_client.table("simulated_time").select("hour, minute").eq("key", "current_time").execute()
+            if res.data and len(res.data) > 0:
+                return {"hour": res.data[0]["hour"], "minute": res.data[0]["minute"]}
+            return {"hour": 9, "minute": 0}
+        else:
+            db = SessionLocal()
+            try:
+                t = db.query(DBSimulatedTime).filter_by(key="current_time").first()
+                if t:
+                    return {"hour": t.hour, "minute": t.minute}
+                return {"hour": 9, "minute": 0}
+            finally:
+                db.close()
+
+    def set_simulated_time(self, hour: int, minute: int) -> Dict[str, int]:
+        if USE_SUPABASE:
+            supabase_client.table("simulated_time").upsert({"key": "current_time", "hour": hour, "minute": minute}).execute()
+            return {"hour": hour, "minute": minute}
+        else:
+            db = SessionLocal()
+            try:
+                t = db.query(DBSimulatedTime).filter_by(key="current_time").first()
+                if t:
+                    t.hour = hour
+                    t.minute = minute
+                else:
+                    t = DBSimulatedTime(key="current_time", hour=hour, minute=minute)
+                    db.add(t)
+                db.commit()
+                return {"hour": t.hour, "minute": t.minute}
+            finally:
+                db.close()
+
+    # --- USERS ---
+    def get_users(self) -> List[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("users").select("*").execute()
+            return res.data or []
+        else:
+            db = SessionLocal()
+            try:
+                users = db.query(DBUser).all()
+                return [
+                    {
+                        "id": u.id, "employeeId": u.employee_id, "name": u.name, "email": u.email,
+                        "phoneNumber": u.phone_number, "department": u.department, 
+                        "businessUnit": u.business_unit, "role": u.role, "createdAt": u.created_at
+                    }
+                    for u in users
+                ]
+            finally:
+                db.close()
+
+    def has_admin(self) -> bool:
+        if USE_SUPABASE:
+            res = supabase_client.table("users").select("id").eq("role", "admin").limit(1).execute()
+            return bool(res.data and len(res.data) > 0)
+        else:
+            db = SessionLocal()
+            try:
+                return db.query(DBUser).filter_by(role="admin").first() is not None
+            finally:
+                db.close()
+
+    def get_user_by_employee_id(self, employee_id: str) -> Optional[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("users").select("*").eq("employee_id", employee_id.upper()).execute()
+            if res.data and len(res.data) > 0:
+                u = res.data[0]
+                return {
+                    "id": u["id"], "employeeId": u["employee_id"], "name": u["name"], "email": u["email"],
+                    "phoneNumber": u.get("phone_number"), "department": u["department"], 
+                    "businessUnit": u["business_unit"], "role": u["role"], "password": u.get("password")
+                }
+                return res.data[0]
+            return None
+        else:
+            db = SessionLocal()
+            try:
+                u = db.query(DBUser).filter(DBUser.employee_id == employee_id.upper()).first()
+                if u:
+                    return {
+                        "id": u.id, "employeeId": u.employee_id, "name": u.name, "email": u.email,
+                        "phoneNumber": u.phone_number, "department": u.department, 
+                        "businessUnit": u.business_unit, "role": u.role, "password": u.password
+                    }
+                    return u
+                return None
+            finally:
+                db.close()
+
+    def register_user(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        emp_id = user_data["employeeId"].strip().upper()
+        email = user_data["email"].strip().lower()
+        
+        # Check uniqueness
+        if USE_SUPABASE:
+            # check id
+            res_id = supabase_client.table("users").select("id").eq("employee_id", emp_id).execute()
+            if res_id.data and len(res_id.data) > 0:
+                return {"success": False, "error": f"Employee ID {emp_id} is already registered."}
+            res_email = supabase_client.table("users").select("id").eq("email", email).execute()
+            if res_email.data and len(res_email.data) > 0:
+                return {"success": False, "error": f"Email {email} is already registered."}
+
+            new_user = {
+                "id": f"u_{int(datetime.datetime.now().timestamp() * 1000)}",
+                "employee_id": emp_id,
+                "name": user_data["name"].strip(),
+                "email": email,
+                "phone_number": user_data.get("phoneNumber", ""),
+                "department": user_data["department"],
+                "business_unit": user_data["businessUnit"],
+                "role": user_data["role"],
+                "password": user_data.get("password", "password"),
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }
+            supabase_client.table("users").insert(new_user).execute()
+            return {"success": True, "user": new_user}
+        else:
+            db = SessionLocal()
+            try:
+                if db.query(DBUser).filter_by(employee_id=emp_id).first():
+                    return {"success": False, "error": f"Employee ID {emp_id} is already registered."}
+                if db.query(DBUser).filter_by(email=email).first():
+                    return {"success": False, "error": f"Email {email} is already registered."}
+
+                u = DBUser(
+                    id=f"u_{int(datetime.datetime.now().timestamp() * 1000)}",
+                    employee_id=emp_id,
+                    name=user_data["name"].strip(),
+                    email=email,
+                    phone_number=user_data.get("phoneNumber", ""),
+                    department=user_data["department"],
+                    business_unit=user_data["businessUnit"],
+                    role=user_data["role"],
+                    password=user_data.get("password", "password")
+                )
+                db.add(u)
+                db.commit()
+                return {
+                    "success": True, 
+                    "user": {
+                        "id": u.id, "employeeId": u.employee_id, "name": u.name, "email": u.email,
+                        "phoneNumber": u.phone_number, "department": u.department, 
+                        "businessUnit": u.business_unit, "role": u.role, "createdAt": u.created_at
+                    }
+                }
+            finally:
+                db.close()
+
+    def update_user_role(self, user_id: str, role: str) -> bool:
+        if USE_SUPABASE:
+            supabase_client.table("users").update({"role": role}).eq("id", user_id).execute()
+            return True
+        else:
+            db = SessionLocal()
+            try:
+                u = db.query(DBUser).filter_by(id=user_id).first()
+                if u:
+                    u.role = role
+                    db.commit()
+                    return True
+                return False
+            finally:
+                db.close()
+
+    # --- FACILITIES ---
+    def get_facilities(self) -> List[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("facilities").select("*").execute()
+            # Sort to keep ordering stable
+            data = res.data or []
+            return sorted(data, key=lambda x: x["facility_id"])
+        else:
+            db = SessionLocal()
+            try:
+                facs = db.query(DBFacility).all()
+                return [
+                    {"facilityId": f.facility_id, "sport": f.sport, "courtName": f.court_name, "status": f.status}
+                    for f in facs
+                ]
+            finally:
+                db.close()
+
+    def toggle_facility_maintenance(self, facility_id: str) -> List[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("facilities").select("status").eq("facility_id", facility_id).execute()
+            if not res.data:
+                return self.get_facilities()
+            current_status = res.data[0]["status"]
+            next_status = "maintenance" if current_status == "active" else "active"
+            supabase_client.table("facilities").update({"status": next_status}).eq("facility_id", facility_id).execute()
+            
+            if next_status == "maintenance":
+                # Invalidate active bookings
+                self._cancel_facility_bookings(facility_id)
+            return self.get_facilities()
+        else:
+            db = SessionLocal()
+            try:
+                f = db.query(DBFacility).filter_by(facility_id=facility_id).first()
+                if f:
+                    f.status = "maintenance" if f.status == "active" else "active"
+                    db.commit()
+                    if f.status == "maintenance":
+                        self._cancel_facility_bookings(facility_id)
+                return [
+                    {"facilityId": x.facility_id, "sport": x.sport, "courtName": x.court_name, "status": x.status}
+                    for x in db.query(DBFacility).all()
+                ]
+            finally:
+                db.close()
+
+    def _cancel_facility_bookings(self, facility_id: str):
+        # Fetch facility info
+        if USE_SUPABASE:
+            fac_res = supabase_client.table("facilities").select("*").eq("facility_id", facility_id).execute()
+            if not fac_res.data: return
+            fac = fac_res.data[0]
+            
+            # Find all confirmed bookings
+            b_res = supabase_client.table("bookings").select("*").eq("facility_id", facility_id).eq("status", "confirmed").execute()
+            bookings = b_res.data or []
+            
+            for b in bookings:
+                supabase_client.table("bookings").update({"status": "cancelled"}).eq("booking_id", b["booking_id"]).execute()
+                
+                # Add alert notification
+                self.add_notification({
+                    "employeeId": b["employee_id"],
+                    "title": "Facility Maintenance: Slot Cancelled ⚠️",
+                    "message": f"Your booking for {b['sport']} ({b['court_name']}) at {b['slot_time']} was cancelled because the facility was put under maintenance.",
+                    "type": "error"
+                })
+                
+                # SMTP Email Trigger
+                email_subject = f"TCS PlaySmart - Booking Cancelled due to Facility Maintenance [{b['booking_id']}] ⚠️"
+                email_body = f"Dear {b['employee_name']},\n\nYour sports booking reservation on PlaySmart has been cancelled because the facility has been put under emergency maintenance.\n\nCancelled Booking Details:\n- Booking ID: {b['booking_id']}\n- Sport Category: {b['sport']}\n- Court / Board: {b['court_name']}\n- Cancelled Time Slot: {b['slot_time']}\n\nWe apologize for the inconvenience. Please select another court or time slot.\n\nBest Regards,\nTCS PlaySmart Admin Team"
+                
+                # Fetch user email
+                user_res = supabase_client.table("users").select("email").eq("employee_id", b["employee_id"]).execute()
+                email_to = user_res.data[0]["email"] if user_res.data else f"{b['employee_id'].lower()}@tcs.com"
+                self.send_simulated_email(email_to, email_subject, email_body)
+        else:
+            db = SessionLocal()
+            try:
+                fac = db.query(DBFacility).filter_by(facility_id=facility_id).first()
+                if not fac: return
+                
+                bookings = db.query(DBBooking).filter_by(facility_id=facility_id, status="confirmed").all()
+                for b in bookings:
+                    b.status = "cancelled"
+                    db.commit()
+                    
+                    self.add_notification({
+                        "employeeId": b.employee_id,
+                        "title": "Facility Maintenance: Slot Cancelled ⚠️",
+                        "message": f"Your booking for {b.sport} ({b.court_name}) at {b.slot_time} was cancelled because the facility was put under maintenance.",
+                        "type": "error"
+                    })
+                    
+                    email_subject = f"TCS PlaySmart - Booking Cancelled due to Facility Maintenance [{b.booking_id}] ⚠️"
+                    email_body = f"Dear {b.employee_name},\n\nYour sports booking reservation on PlaySmart has been cancelled because the facility has been put under emergency maintenance.\n\nCancelled Booking Details:\n- Booking ID: {b.booking_id}\n- Sport Category: {b.sport}\n- Court / Board: {b.court_name}\n- Cancelled Time Slot: {b.slot_time}\n\nWe apologize for the inconvenience. Please select another court or time slot.\n\nBest Regards,\nTCS PlaySmart Admin Team"
+                    
+                    u = db.query(DBUser).filter_by(employee_id=b.employee_id).first()
+                    email_to = u.email if u else f"{b.employee_id.lower()}@tcs.com"
+                    self.send_simulated_email(email_to, email_subject, email_body)
+            finally:
+                db.close()
+
+    # --- BOOKINGS ---
+    def get_bookings(self) -> List[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("bookings").select("*").execute()
+            # Convert keys to camelCase for the frontend
+            bookings = res.data or []
+            return [
+                {
+                    "bookingId": b["booking_id"], "employeeId": b["employee_id"], "employeeName": b["employee_name"],
+                    "facilityId": b["facility_id"], "sport": b["sport"], "courtName": b["court_name"],
+                    "slotTime": b["slot_time"], "bookingSource": b["booking_source"], "status": b["status"],
+                    "createdAt": b["created_at"]
+                }
+                for b in bookings
+            ]
+        else:
+            db = SessionLocal()
+            try:
+                books = db.query(DBBooking).all()
+                return [
+                    {
+                        "bookingId": b.booking_id, "employeeId": b.employee_id, "employeeName": b.employee_name,
+                        "facilityId": b.facility_id, "sport": b.sport, "courtName": b.court_name,
+                        "slotTime": b.slot_time, "bookingSource": b.booking_source, "status": b.status,
+                        "createdAt": b.created_at
+                    }
+                    for b in books
+                ]
+            finally:
+                db.close()
+
+    def create_booking(self, booking_data: Dict[str, Any]) -> Dict[str, Any]:
+        emp_id = booking_data["employeeId"].strip().upper()
+        email = booking_data.get("email", "").strip().lower()
+        facility_id = booking_data["facilityId"]
+        slot_time = booking_data["slotTime"]
+        source = booking_data["bookingSource"]
+
+        # 1. Validate employee
+        employee = self.get_user_by_employee_id(emp_id)
+        if not employee:
+            if email:
+                # Auto register
+                reg_res = self.register_user({
+                    "employeeId": emp_id,
+                    "name": f"Employee {emp_id}",
+                    "email": email,
+                    "phoneNumber": "",
+                    "department": "BFSI",
+                    "businessUnit": "BU_TCS_CHN",
+                    "role": "employee"
+                })
+                if reg_res["success"]:
+                    employee = reg_res["user"]
+                else:
+                    return {"success": False, "error": reg_res.get("error", "Failed to register user.")}
+            else:
+                return {"success": False, "error": f"Employee ID {emp_id} not found."}
+        elif email and employee["email"].lower() != email:
+            return {"success": False, "error": f"The provided Email ID does not match the registered Email for Employee ID {emp_id}."}
+
+        # 2. Validate Facility status
+        facilities = self.get_facilities()
+        facility = next((f for f in facilities if f["facilityId"] == facility_id), None)
+        if not facility:
+            return {"success": False, "error": "Facility not found."}
+        if facility["status"] == "maintenance":
+            return {"success": False, "error": f"{facility['sport']} {facility['courtName']} is under maintenance and cannot be booked."}
+
+        # 3. Check booking rules & window bypass for Admins
+        sim_time = self.get_simulated_time()
+        # Admin bypass check
+        is_admin_override = employee["role"] == "admin"
+        
+        if not is_admin_override:
+            if source == "security":
+                if sim_time["hour"] < 5 or sim_time["hour"] >= 10:
+                    return {
+                        "success": False,
+                        "error": f"Security booking is frozen. The Security assisted booking window is active only from 5:00 AM to 10:00 AM."
+                    }
+            elif source == "online":
+                if sim_time["hour"] < 10 or sim_time["hour"] >= 20:
+                    return {
+                        "success": False,
+                        "error": f"Online booking is closed. Employee Booking Window is active from 10:00 AM to 8:00 PM."
+                    }
+
+        # 4. Check double booking / overlapping
+        bookings = self.get_bookings()
+        
+        # Check if slot is already occupied
+        already_booked = next((b for b in bookings if b["facilityId"] == facility_id and b["slotTime"] == slot_time and b["status"] != "cancelled"), None)
+        if already_booked:
+            return {"success": False, "error": "This slot is already reserved."}
+
+        # Overlapping slot check (same employee booked at same slot time in ANY sport)
+        overlap = next((b for b in bookings if b["employeeId"] == emp_id and b["slotTime"] == slot_time and b["status"] != "cancelled"), None)
+        if overlap:
+            return {"success": False, "error": f"{employee['name']} already has another booking at {slot_time}."}
+
+        # Same sport daily limit check (PRD: max 1 active slot per sport per day)
+        sport_overlap = next((b for b in bookings if b["employeeId"] == emp_id and b["sport"] == facility["sport"] and b["status"] != "cancelled"), None)
+        if sport_overlap:
+            return {"success": False, "error": f"{employee['name']} already has an active booking for {facility['sport']} today. Employees are limited to one active booking per sport per day."}
+
+        # 5. Insert Booking
+        booking_id = f"b_{int(datetime.datetime.now().timestamp() * 1000)}"
+        new_booking = {
+            "booking_id": booking_id,
+            "employee_id": emp_id,
+            "employee_name": employee["name"],
+            "facility_id": facility_id,
+            "sport": facility["sport"],
+            "court_name": facility["courtName"],
+            "slot_time": slot_time,
+            "booking_source": source,
+            "status": "confirmed",
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+
+        if USE_SUPABASE:
+            supabase_client.table("bookings").insert(new_booking).execute()
+        else:
+            db = SessionLocal()
+            try:
+                b = DBBooking(
+                    booking_id=booking_id,
+                    employee_id=emp_id,
+                    employee_name=employee["name"],
+                    facility_id=facility_id,
+                    sport=facility["sport"],
+                    court_name=facility["courtName"],
+                    slot_time=slot_time,
+                    booking_source=source,
+                    status="confirmed"
+                )
+                db.add(b)
+                db.commit()
+            finally:
+                db.close()
+
+        # 6. Add local notification
+        self.add_notification({
+            "employeeId": emp_id,
+            "title": "Booking Confirmed 🎉",
+            "message": f"Your slot for {facility['sport']} ({facility['courtName']}) at {slot_time} has been successfully booked!",
+            "type": "success"
+        })
+
+        # 7. Simulated SMTP dispatcher outbox email trigger
+        email_to = employee["email"]
+        email_subject = f"TCS PlaySmart - Slot Booking Confirmed [{booking_id}] 🏸"
+        email_body = f"Dear {employee['name']},\n\nYour sports booking request on PlaySmart has been successfully confirmed!\n\nBooking Details:\n- Booking ID: {booking_id}\n- Sport Category: {facility['sport']}\n- Court / Board: {facility['courtName']}\n- Reserved Time Slot: {slot_time}\n- Booking Channel: {source.capitalize()} Booking\n- Simulated Timestamp: {sim_time['hour']}:{str(sim_time['minute']).zfill(2)}\n\nPlease present your simulated QR Gate Pass at the court check-in checkpoint.\n\nEnjoy your active session!\n\nBest Regards,\nTCS PlaySmart Admin Team"
+        self.send_simulated_email(email_to, email_subject, email_body)
+
+        # Convert back camelCase for response
+        return {
+            "success": True,
+            "booking": {
+                "bookingId": booking_id, "employeeId": emp_id, "employeeName": employee["name"],
+                "facilityId": facility_id, "sport": facility["sport"], "courtName": facility["courtName"],
+                "slotTime": slot_time, "bookingSource": source, "status": "confirmed"
+            }
+        }
+
+    def cancel_booking(self, booking_id: str) -> Dict[str, Any]:
+        # Fetch booking details
+        booking = None
+        if USE_SUPABASE:
+            res = supabase_client.table("bookings").select("*").eq("booking_id", booking_id).execute()
+            if res.data: booking = res.data[0]
+        else:
+            db = SessionLocal()
+            try:
+                b = db.query(DBBooking).filter_by(booking_id=booking_id).first()
+                if b:
+                    booking = {
+                        "booking_id": b.booking_id, "employee_id": b.employee_id, "employee_name": b.employee_name,
+                        "facility_id": b.facility_id, "sport": b.sport, "court_name": b.court_name,
+                        "slot_time": b.slot_time, "status": b.status
+                    }
+            finally:
+                db.close()
+
+        if not booking:
+            return {"success": False, "error": "Booking not found."}
+
+        if booking["status"] == "cancelled":
+            return {"success": False, "error": "Booking is already cancelled."}
+
+        # Update status
+        if USE_SUPABASE:
+            supabase_client.table("bookings").update({"status": "cancelled"}).eq("booking_id", booking_id).execute()
+        else:
+            db = SessionLocal()
+            try:
+                b = db.query(DBBooking).filter_by(booking_id=booking_id).first()
+                b.status = "cancelled"
+                db.commit()
+            finally:
+                db.close()
+
+        # Add cancel notification
+        self.add_notification({
+            "employeeId": booking["employee_id"],
+            "title": "Booking Cancelled 🔴",
+            "message": f"Your booking for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']} was cancelled.",
+            "type": "warning"
+        })
+
+        # Send SMTP cancellation email
+        u = self.get_user_by_employee_id(booking["employee_id"])
+        email_to = u["email"] if u else f"{booking['employee_id'].lower()}@tcs.com"
+        email_subject = f"TCS PlaySmart - Slot Booking Cancelled [{booking_id}] 🔴"
+        email_body = f"Dear {booking['employee_name']},\n\nYour sports booking reservation on PlaySmart has been successfully cancelled.\n\nCancelled Booking Details:\n- Booking ID: {booking_id}\n- Sport Category: {booking['sport']}\n- Court / Board: {booking['court_name']}\n- Cancelled Time Slot: {booking['slot_time']}\n\nIf you did not request this cancellation, please contact the PlaySmart Administrator.\n\nBest Regards,\nTCS PlaySmart Admin Team"
+        self.send_simulated_email(email_to, email_subject, email_body)
+
+        # Trigger auto promotion
+        self.process_waitlist_promotion(booking["facility_id"], booking["slot_time"])
+
+        return {"success": True}
+
+    def update_booking_status(self, booking_id: str, status: str, verified_by: str) -> Dict[str, Any]:
+        # Fetch booking details
+        booking = None
+        if USE_SUPABASE:
+            res = supabase_client.table("bookings").select("*").eq("booking_id", booking_id).execute()
+            if res.data: booking = res.data[0]
+        else:
+            db = SessionLocal()
+            try:
+                b = db.query(DBBooking).filter_by(booking_id=booking_id).first()
+                if b:
+                    booking = {
+                        "booking_id": b.booking_id, "employee_id": b.employee_id, "employee_name": b.employee_name,
+                        "facility_id": b.facility_id, "sport": b.sport, "court_name": b.court_name,
+                        "slot_time": b.slot_time, "status": b.status
+                    }
+            finally:
+                db.close()
+
+        if not booking:
+            return {"success": False, "error": "Booking not found."}
+
+        previous_status = booking["status"]
+        if USE_SUPABASE:
+            supabase_client.table("bookings").update({"status": status}).eq("booking_id", booking_id).execute()
+        else:
+            db = SessionLocal()
+            try:
+                b = db.query(DBBooking).filter_by(booking_id=booking_id).first()
+                b.status = status
+                db.commit()
+            finally:
+                db.close()
+
+        # Handle check-in and no-show alerts
+        if status == "checked_in":
+            self.add_notification({
+                "employeeId": booking["employee_id"],
+                "title": "Attendance Verified ✅",
+                "message": f"Enjoy your game of {booking['sport']}! Your entry has been verified at check gate by Security {verified_by}.",
+                "type": "success"
+            })
+        elif status == "no_show":
+            self.add_notification({
+                "employeeId": booking["employee_id"],
+                "title": "Marked as No-Show ⚠️",
+                "message": f"You were marked as a no-show for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']}.",
+                "type": "error"
+            })
+        elif status == "cancelled" and previous_status != "cancelled":
+            self.add_notification({
+                "employeeId": booking["employee_id"],
+                "title": "Booking Cancelled 🔴",
+                "message": f"Your booking for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']} was cancelled.",
+                "type": "warning"
+            })
+            self.process_waitlist_promotion(booking["facility_id"], booking["slot_time"])
+
+        return {"success": True}
+
+    # --- WAITLIST ---
+    def get_waitlist(self) -> List[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("waitlist").select("*").execute()
+            data = res.data or []
+            return [
+                {
+                    "waitlistId": w["waitlist_id"], "employeeId": w["employee_id"], "employeeName": w["employee_name"],
+                    "facilityId": w["facility_id"], "sport": w["sport"], "courtName": w["court_name"],
+                    "slotTime": w["slot_time"], "createdAt": w["created_at"]
+                }
+                for w in data
+            ]
+        else:
+            db = SessionLocal()
+            try:
+                wlist = db.query(DBWaitlist).all()
+                return [
+                    {
+                        "waitlistId": w.waitlist_id, "employeeId": w.employee_id, "employeeName": w.employee_name,
+                        "facilityId": w.facility_id, "sport": w.sport, "courtName": w.court_name,
+                        "slotTime": w.slot_time, "createdAt": w.created_at
+                    }
+                    for w in wlist
+                ]
+            finally:
+                db.close()
+
+    def join_waitlist(self, employee_id: str, facility_id: str, slot_time: str) -> Dict[str, Any]:
+        employee = self.get_user_by_employee_id(employee_id)
+        if not employee:
+            return {"success": False, "error": "Employee ID not found."}
+
+        facilities = self.get_facilities()
+        facility = next((f for f in facilities if f["facilityId"] == facility_id), None)
+        if not facility:
+            return {"success": False, "error": "Facility not found."}
+
+        # Check if already waitlisted for this facility and slot
+        waitlist = self.get_waitlist()
+        already = next((w for w in waitlist if w["employeeId"] == employee_id.upper() and w["facilityId"] == facility_id and w["slotTime"] == slot_time), None)
+        if already:
+            return {"success": False, "error": "You are already on the waitlist for this slot."}
+
+        # Check if they have a confirmed booking at that exact slot
+        bookings = self.get_bookings()
+        has_slot = next((b for b in bookings if b["employeeId"] == employee_id.upper() and b["slotTime"] == slot_time and b["status"] != "cancelled"), None)
+        if has_slot:
+            return {"success": False, "error": "You already have a confirmed booking at this time slot."}
+
+        waitlist_id = f"w_{int(datetime.datetime.now().timestamp() * 1000)}"
+        new_entry = {
+            "waitlist_id": waitlist_id,
+            "employee_id": employee_id.upper(),
+            "employee_name": employee["name"],
+            "facility_id": facility_id,
+            "sport": facility["sport"],
+            "court_name": facility["courtName"],
+            "slot_time": slot_time,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+
+        if USE_SUPABASE:
+            supabase_client.table("waitlist").insert(new_entry).execute()
+        else:
+            db = SessionLocal()
+            try:
+                w = DBWaitlist(
+                    waitlist_id=waitlist_id,
+                    employee_id=employee_id.upper(),
+                    employee_name=employee["name"],
+                    facility_id=facility_id,
+                    sport=facility["sport"],
+                    court_name=facility["courtName"],
+                    slot_time=slot_time
+                )
+                db.add(w)
+                db.commit()
+            finally:
+                db.close()
+
+        self.add_notification({
+            "employeeId": employee_id.upper(),
+            "title": "Joined Waitlist ⏳",
+            "message": f"You have successfully joined the waitlist for {facility['sport']} ({facility['courtName']}) at {slot_time}.",
+            "type": "info"
+        })
+
+        return {
+            "success": True, 
+            "entry": {
+                "waitlistId": waitlist_id, "employeeId": employee_id.upper(), "employeeName": employee["name"],
+                "facilityId": facility_id, "sport": facility["sport"], "courtName": facility["courtName"],
+                "slotTime": slot_time
+            }
+        }
+
+    def leave_waitlist(self, waitlist_id: str) -> Dict[str, Any]:
+        # Fetch waitlist item
+        waitlist_item = None
+        if USE_SUPABASE:
+            res = supabase_client.table("waitlist").select("*").eq("waitlist_id", waitlist_id).execute()
+            if res.data: waitlist_item = res.data[0]
+        else:
+            db = SessionLocal()
+            try:
+                w = db.query(DBWaitlist).filter_by(waitlist_id=waitlist_id).first()
+                if w:
+                    waitlist_item = {
+                        "waitlist_id": w.waitlist_id, "employee_id": w.employee_id, "sport": w.sport,
+                        "court_name": w.court_name, "slot_time": w.slot_time
+                    }
+            finally:
+                db.close()
+
+        if not waitlist_item:
+            return {"success": False, "error": "Waitlist entry not found."}
+
+        # Delete
+        if USE_SUPABASE:
+            supabase_client.table("waitlist").delete().eq("waitlist_id", waitlist_id).execute()
+        else:
+            db = SessionLocal()
+            try:
+                w = db.query(DBWaitlist).filter_by(waitlist_id=waitlist_id).first()
+                db.delete(w)
+                db.commit()
+            finally:
+                db.close()
+
+        self.add_notification({
+            "employeeId": waitlist_item["employee_id"],
+            "title": "Left Waitlist 🔴",
+            "message": f"You have left the waitlist for {waitlist_item['sport']} ({waitlist_item['court_name']}) at {waitlist_item['slot_time']}.",
+            "type": "warning"
+        })
+
+        return {"success": True}
+
+    def process_waitlist_promotion(self, facility_id: str, slot_time: str):
+        # Fetch first waitlist entry for this slot
+        entry = None
+        if USE_SUPABASE:
+            res = supabase_client.table("waitlist").select("*").eq("facility_id", facility_id).eq("slot_time", slot_time).order("created_at").limit(1).execute()
+            if res.data and len(res.data) > 0: entry = res.data[0]
+        else:
+            db = SessionLocal()
+            try:
+                w = db.query(DBWaitlist).filter_by(facility_id=facility_id, slot_time=slot_time).order_by(DBWaitlist.created_at).first()
+                if w:
+                    entry = {
+                        "waitlist_id": w.waitlist_id, "employee_id": w.employee_id, "employee_name": w.employee_name,
+                        "facility_id": w.facility_id, "sport": w.sport, "court_name": w.court_name, "slot_time": w.slot_time
+                    }
+            finally:
+                db.close()
+
+        if not entry: return
+
+        # Remove from waitlist
+        if USE_SUPABASE:
+            supabase_client.table("waitlist").delete().eq("waitlist_id", entry["waitlist_id"]).execute()
+        else:
+            db = SessionLocal()
+            try:
+                w = db.query(DBWaitlist).filter_by(waitlist_id=entry["waitlist_id"]).first()
+                db.delete(w)
+                db.commit()
+            finally:
+                db.close()
+
+        # Create Booking
+        booking_id = f"b_{int(datetime.datetime.now().timestamp() * 1000)}"
+        new_booking = {
+            "booking_id": booking_id,
+            "employee_id": entry["employee_id"],
+            "employee_name": entry["employee_name"],
+            "facility_id": entry["facility_id"],
+            "sport": entry["sport"],
+            "court_name": entry["court_name"],
+            "slot_time": entry["slot_time"],
+            "booking_source": "online",
+            "status": "confirmed",
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+
+        if USE_SUPABASE:
+            supabase_client.table("bookings").insert(new_booking).execute()
+        else:
+            db = SessionLocal()
+            try:
+                b = DBBooking(
+                    booking_id=booking_id,
+                    employee_id=entry["employee_id"],
+                    employee_name=entry["employee_name"],
+                    facility_id=entry["facility_id"],
+                    sport=entry["sport"],
+                    court_name=entry["court_name"],
+                    slot_time=entry["slot_time"],
+                    booking_source="online",
+                    status="confirmed"
+                )
+                db.add(b)
+                db.commit()
+            finally:
+                db.close()
+
+        # Notify
+        self.add_notification({
+            "employeeId": entry["employee_id"],
+            "title": "Waitlist Promoted 🎉",
+            "message": f"Your waitlist request for {entry['sport']} ({entry['court_name']}) at {entry['slot_time']} has been promoted to a Confirmed Booking!",
+            "type": "success"
+        })
+
+        # Send SMTP Promo Email
+        u = self.get_user_by_employee_id(entry["employee_id"])
+        email_to = u["email"] if u else f"{entry['employee_id'].lower()}@tcs.com"
+        email_subject = f"TCS PlaySmart - Waitlist Promoted to Confirmed Booking [{booking_id}] 🎉"
+        email_body = f"Dear {entry['employee_name']},\n\nGood news! Your waitlist request for {entry['sport']} ({entry['court_name']}) at {entry['slot_time']} has been promoted to a Confirmed Booking because a reservation was cancelled!\n\nBooking Details:\n- Booking ID: {booking_id}\n- Sport Category: {entry['sport']}\n- Court / Board: {entry['court_name']}\n- Reserved Time Slot: {entry['slot_time']}\n- Booking Channel: Waitlist Auto-Promotion\n\nPlease present your simulated QR Gate Pass at the court check-in checkpoint.\n\nEnjoy your active session!\n\nBest Regards,\nTCS PlaySmart Admin Team"
+        self.send_simulated_email(email_to, email_subject, email_body)
+
+    # --- NOTIFICATIONS ---
+    def get_notifications(self, employee_id: str) -> List[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("notifications").select("*").eq("employee_id", employee_id.upper()).order("created_at", desc=True).execute()
+            data = res.data or []
+            return [
+                {
+                    "id": n["id"], "employeeId": n["employee_id"], "title": n["title"],
+                    "message": n["message"], "type": n["type"], "read": n["read"],
+                    "createdAt": n["created_at"]
+                }
+                for n in data
+            ]
+        else:
+            db = SessionLocal()
+            try:
+                notifs = db.query(DBNotification).filter_by(employee_id=employee_id.upper()).order_by(DBNotification.created_at.desc()).all()
+                return [
+                    {
+                        "id": n.id, "employeeId": n.employee_id, "title": n.title,
+                        "message": n.message, "type": n.type, "read": n.read,
+                        "createdAt": n.created_at
+                    }
+                    for n in notifs
+                ]
+            finally:
+                db.close()
+
+    def add_notification(self, notif_data: Dict[str, Any]):
+        notif_id = f"notif_{int(datetime.datetime.now().timestamp() * 1000)}"
+        new_notif = {
+            "id": notif_id,
+            "employee_id": notif_data["employeeId"].upper(),
+            "title": notif_data["title"],
+            "message": notif_data["message"],
+            "type": notif_data.get("type", "info"),
+            "read": False,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+
+        if USE_SUPABASE:
+            supabase_client.table("notifications").insert(new_notif).execute()
+        else:
+            db = SessionLocal()
+            try:
+                n = DBNotification(
+                    id=notif_id,
+                    employee_id=notif_data["employeeId"].upper(),
+                    title=notif_data["title"],
+                    message=notif_data["message"],
+                    type=notif_data.get("type", "info")
+                )
+                db.add(n)
+                db.commit()
+            finally:
+                db.close()
+
+    def mark_notification_read(self, id: str) -> bool:
+        if USE_SUPABASE:
+            supabase_client.table("notifications").update({"read": True}).eq("id", id).execute()
+            return True
+        else:
+            db = SessionLocal()
+            try:
+                n = db.query(DBNotification).filter_by(id=id).first()
+                if n:
+                    n.read = True
+                    db.commit()
+                    return True
+                return False
+            finally:
+                db.close()
+
+    # --- SIMULATED EMAILS ---
+    def get_simulated_emails(self) -> List[Dict[str, Any]]:
+        if USE_SUPABASE:
+            res = supabase_client.table("simulated_emails").select("*").execute()
+            emails = res.data or []
+            return [
+                {
+                    "id": e["id"], "to": e["to_email"], "subject": e["subject"],
+                    "body": e["body"], "sentAt": e["sent_at"]
+                }
+                for e in emails
+            ]
+        else:
+            db = SessionLocal()
+            try:
+                emails = db.query(DBSimulatedEmail).all()
+                return [
+                    {
+                        "id": e.id, "to": e.to_email, "subject": e.subject,
+                        "body": e.body, "sentAt": e.sent_at
+                    }
+                    for e in emails
+                ]
+            finally:
+                db.close()
+
+    def send_simulated_email(self, to: str, subject: str, body: str):
+        email_id = f"email_{int(datetime.datetime.now().timestamp() * 1000)}"
+        new_email = {
+            "id": email_id,
+            "to_email": to,
+            "subject": subject,
+            "body": body,
+            "sent_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+
+        if USE_SUPABASE:
+            supabase_client.table("simulated_emails").insert(new_email).execute()
+        else:
+            db = SessionLocal()
+            try:
+                e = DBSimulatedEmail(
+                    id=email_id,
+                    to_email=to,
+                    subject=subject,
+                    body=body
+                )
+                db.add(e)
+                db.commit()
+            finally:
+                db.close()
+
+    def clear_simulated_emails(self) -> bool:
+        if USE_SUPABASE:
+            supabase_client.table("simulated_emails").delete().neq("id", "dummy").execute()
+            return True
+        else:
+            db = SessionLocal()
+            try:
+                db.query(DBSimulatedEmail).delete()
+                db.commit()
+                return True
+            finally:
+                db.close()
+
+# Singleton DB Manager instance
+db_mgr = DatabaseManager()

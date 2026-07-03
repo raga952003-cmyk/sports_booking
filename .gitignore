@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Production builds
+dist/
+frontend/dist/
+
+# SQLite sandboxes
+*.db
+backend/*.db
+
+# Credentials
+.env
+.env*.local
+
+# Editor/System directories
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

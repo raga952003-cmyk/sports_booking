@@ -1,0 +1,204 @@
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any
+
+from database import db_mgr
+
+app = FastAPI(title="TCS PlaySmart API Server", version="1.0.0")
+
+# Enable CORS for the React Frontend (defaulting to localhost:3000)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ----------------- PYDANTIC REQUEST SCHEMAS -----------------
+
+class TimeConfigSchema(BaseModel):
+    hour: int = Field(..., ge=0, le=23)
+    minute: int = Field(..., ge=0, le=59)
+
+class UserRegisterSchema(BaseModel):
+    employeeId: str
+    name: str
+    email: str
+    phoneNumber: Optional[str] = ""
+    department: str
+    businessUnit: str
+    role: str
+    password: Optional[str] = "password"
+
+class UserLoginSchema(BaseModel):
+    employeeId: str
+    password: Optional[str] = None
+
+class RoleUpdateSchema(BaseModel):
+    userId: str
+    role: str
+
+class BookingCreateSchema(BaseModel):
+    employeeId: str
+    email: Optional[str] = None
+    facilityId: str
+    slotTime: str
+    bookingSource: str  # online, security
+
+class CancelBookingSchema(BaseModel):
+    bookingId: str
+
+class UpdateBookingStatusSchema(BaseModel):
+    bookingId: str
+    status: str  # checked_in, no_show, cancelled
+    verifiedBy: Optional[str] = "SEC202"
+
+class JoinWaitlistSchema(BaseModel):
+    employeeId: str
+    facilityId: str
+    slotTime: str
+
+class LeaveWaitlistSchema(BaseModel):
+    waitlistId: str
+
+class MarkNotificationReadSchema(BaseModel):
+    id: str
+
+
+# ----------------- REST ENDPOINTS -----------------
+
+# --- SYSTEM HEALTH / ROOT ---
+@app.get("/")
+def read_root():
+    return {"status": "online", "message": "TCS PlaySmart API Server running successfully."}
+
+# --- SIMULATED TIME ---
+@app.get("/api/time")
+def get_time():
+    return db_mgr.get_simulated_time()
+
+@app.post("/api/time")
+def set_time(config: TimeConfigSchema):
+    return db_mgr.set_simulated_time(config.hour, config.minute)
+
+# --- USERS ---
+@app.get("/api/users")
+def get_users():
+    return db_mgr.get_users()
+
+@app.get("/api/users/has-admin")
+def has_admin():
+    return {"hasAdmin": db_mgr.has_admin()}
+
+@app.post("/api/users/register")
+def register_user(user: UserRegisterSchema):
+    result = db_mgr.register_user(user.model_dump())
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.post("/api/users/login")
+def login_user(login: UserLoginSchema):
+    user = db_mgr.get_user_by_employee_id(login.employeeId)
+    if not user:
+        raise HTTPException(status_code=404, detail="Invalid Employee ID. No account found.")
+    
+    if login.password:
+        user_password = user.get("password") or "password"
+        if login.password != user_password:
+            raise HTTPException(status_code=401, detail="Incorrect password.")
+            
+    return {"success": True, "user": user}
+
+@app.post("/api/users/role")
+def update_role(update: RoleUpdateSchema):
+    success = db_mgr.update_user_role(update.userId, update.role)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"success": True}
+
+# --- FACILITIES ---
+@app.get("/api/facilities")
+def get_facilities():
+    return db_mgr.get_facilities()
+
+@app.post("/api/facilities/maintenance/{facility_id}")
+def toggle_maintenance(facility_id: str):
+    return db_mgr.toggle_facility_maintenance(facility_id)
+
+# --- BOOKINGS ---
+@app.get("/api/bookings")
+def get_bookings():
+    return db_mgr.get_bookings()
+
+@app.post("/api/bookings")
+def create_booking(booking: BookingCreateSchema):
+    result = db_mgr.create_booking(booking.model_dump())
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.post("/api/bookings/cancel")
+def cancel_booking(cancel: CancelBookingSchema):
+    result = db_mgr.cancel_booking(cancel.bookingId)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.post("/api/bookings/status")
+def update_booking_status(status_update: UpdateBookingStatusSchema):
+    result = db_mgr.update_booking_status(
+        status_update.bookingId, 
+        status_update.status, 
+        status_update.verifiedBy
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+# --- WAITLIST ---
+@app.get("/api/waitlist")
+def get_waitlist():
+    return db_mgr.get_waitlist()
+
+@app.post("/api/waitlist/join")
+def join_waitlist(waitlist_req: JoinWaitlistSchema):
+    result = db_mgr.join_waitlist(
+        waitlist_req.employeeId, 
+        waitlist_req.facilityId, 
+        waitlist_req.slotTime
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.post("/api/waitlist/leave")
+def leave_waitlist(waitlist_req: LeaveWaitlistSchema):
+    result = db_mgr.leave_waitlist(waitlist_req.waitlistId)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+# --- NOTIFICATIONS ---
+@app.get("/api/notifications/{employee_id}")
+def get_notifications(employee_id: str):
+    return db_mgr.get_notifications(employee_id)
+
+@app.post("/api/notifications/read")
+def mark_notification_read(req: MarkNotificationReadSchema):
+    success = db_mgr.mark_notification_read(req.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    return {"success": True}
+
+# --- SIMULATED SMTP OUTBOX ---
+@app.get("/api/emails")
+def get_emails():
+    return db_mgr.get_simulated_emails()
+
+@app.post("/api/emails/clear")
+def clear_emails():
+    db_mgr.clear_simulated_emails()
+    return {"success": True}

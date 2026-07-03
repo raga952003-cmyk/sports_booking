@@ -1,0 +1,6 @@
+{
+  "name": "PlaySmart",
+  "description": "Smart Sports Facility Management System for TCS Chennai campus to book sports slots, view live availability, manage facility status, and track attendance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
