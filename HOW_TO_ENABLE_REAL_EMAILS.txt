@@ -1,0 +1,146 @@
+╔══════════════════════════════════════════════════════════════════╗
+║           HOW TO SEND REAL EMAILS TO GMAIL ADDRESSES            ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Currently, emails are only STORED in the database. To send them to
+actual Gmail addresses, follow these 4 simple steps:
+
+┌──────────────────────────────────────────────────────────────────┐
+│ STEP 1: GET GMAIL APP PASSWORD (2 minutes)                      │
+└──────────────────────────────────────────────────────────────────┘
+
+1. Go to: https://myaccount.google.com/security
+
+2. Scroll down and click "2-Step Verification"
+   (If not enabled, enable it first)
+
+3. Scroll down to "App passwords" → Click it
+
+4. Select:
+   - App: Mail
+   - Device: Other (Custom name) → Type "PlaySmart"
+
+5. Click "Generate"
+
+6. COPY the 16-character password
+   Example: abcd efgh ijkl mnop
+   (Remove spaces when pasting)
+
+┌──────────────────────────────────────────────────────────────────┐
+│ STEP 2: UPDATE .ENV FILE                                        │
+└──────────────────────────────────────────────────────────────────┘
+
+Open the .env file and:
+
+1. Find these lines (around line 10):
+   # ENABLE_REAL_EMAILS=false
+   # SMTP_HOST=smtp.gmail.com
+   # SMTP_PORT=587
+   # SMTP_USER=your.email@gmail.com
+   # SMTP_PASSWORD=your_16_char_app_password_here
+   # SMTP_FROM_EMAIL=your.email@gmail.com
+   # SMTP_FROM_NAME=TCS PlaySmart
+
+2. REMOVE the # from each line
+
+3. REPLACE:
+   - your.email@gmail.com → Your actual Gmail address
+   - your_16_char_app_password_here → The password from Step 1
+
+4. CHANGE: ENABLE_REAL_EMAILS=false to ENABLE_REAL_EMAILS=true
+
+5. SAVE the file
+
+EXAMPLE (after editing):
+   ENABLE_REAL_EMAILS=true
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=john.doe@gmail.com
+   SMTP_PASSWORD=abcdefghijklmnop
+   SMTP_FROM_EMAIL=john.doe@gmail.com
+   SMTP_FROM_NAME=TCS PlaySmart
+
+┌──────────────────────────────────────────────────────────────────┐
+│ STEP 3: RESTART BACKEND                                         │
+└──────────────────────────────────────────────────────────────────┘
+
+The backend will automatically reload when you save .env
+Wait 2-3 seconds for the reload to complete.
+
+┌──────────────────────────────────────────────────────────────────┐
+│ STEP 4: TEST IT!                                                │
+└──────────────────────────────────────────────────────────────────┘
+
+Option A - Test Email Script:
+   cd backend
+   python test_email.py
+
+   You should see:
+   ✅ SUCCESS! Test email sent.
+   
+   Check your Gmail inbox!
+
+Option B - Book a Facility:
+   1. Go to http://localhost:3000
+   2. Login/Register with your Gmail address
+   3. Book a sports facility
+   4. Check your Gmail inbox for confirmation!
+
+┌──────────────────────────────────────────────────────────────────┐
+│ TROUBLESHOOTING                                                  │
+└──────────────────────────────────────────────────────────────────┘
+
+❌ "SMTP authentication failed"
+   → Check your Gmail address and app password are correct
+   → Make sure 2-Step Verification is enabled
+   → App password should be 16 characters with no spaces
+
+❌ "SMTP credentials not configured"
+   → Make sure you removed # from all SMTP lines
+   → Check SMTP_USER and SMTP_PASSWORD are filled in
+
+❌ No email received (but no error)
+   → Check your spam/junk folder
+   → Mark first email as "Not Spam"
+   → Wait 1-2 minutes
+
+❌ Backend not reloading
+   → Manually restart: Ctrl+C then run again
+   → Check .env file is saved
+
+┌──────────────────────────────────────────────────────────────────┐
+│ WHERE TO VIEW EMAILS                                            │
+└──────────────────────────────────────────────────────────────────┘
+
+Simulated Mode (Current):
+   → http://localhost:8000/api/emails
+
+Real Gmail Mode (After setup):
+   → Your actual Gmail inbox at gmail.com
+   → PLUS still stored at http://localhost:8000/api/emails
+
+┌──────────────────────────────────────────────────────────────────┐
+│ QUICK REFERENCE                                                  │
+└──────────────────────────────────────────────────────────────────┘
+
+Files:
+   .env                    - Configuration file (edit this!)
+   ENABLE_GMAIL.md         - Detailed guide
+   EMAIL_SETUP.md          - Complete documentation
+   backend/test_email.py   - Test script
+
+Commands:
+   python backend/test_email.py    - Test email configuration
+   
+URLs:
+   http://localhost:8000/api/emails - View sent emails
+
+═══════════════════════════════════════════════════════════════════
+
+SUMMARY:
+1. Get Gmail App Password (https://myaccount.google.com/security)
+2. Edit .env file - Remove # and add your credentials
+3. Set ENABLE_REAL_EMAILS=true
+4. Test with: python backend/test_email.py
+
+That's it! Emails will be sent to real Gmail addresses! 📧✨
