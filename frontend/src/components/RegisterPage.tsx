@@ -39,6 +39,10 @@ export default function RegisterPage({ onSuccess, onNavigateBack, onNavigateLogi
     if (!employeeId.trim()) return setError('Employee ID is required.');
     if (!name.trim()) return setError('Name is required.');
     if (!email.trim()) return setError('Email address is required.');
+    const emailLower = email.trim().toLowerCase();
+    if (!emailLower.endsWith('@tcs.com') && !emailLower.endsWith('@gmail.com')) {
+      return setError('Only TCS (@tcs.com) and Gmail (@gmail.com) email addresses are allowed.');
+    }
     if (!password) return setError('Password is required.');
     if (password !== confirmPassword) return setError('Passwords do not match.');
 
@@ -74,7 +78,7 @@ export default function RegisterPage({ onSuccess, onNavigateBack, onNavigateLogi
           <ChevronLeft className="w-4 h-4" /> Back to home
         </button>
         <div className="flex items-center justify-center gap-3 mb-4">
-          <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center font-bold italic text-white shadow-sm">P</div>
+          <img src="/tcs_logo.png" className="h-8 object-contain" alt="TCS Logo" />
           <span className="text-xl font-bold tracking-tight text-[#003366] font-display">PlaySmart</span>
           <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-[9px] font-semibold uppercase tracking-wider font-sans">Campus Hub</span>
         </div>
@@ -248,7 +252,7 @@ export default function RegisterPage({ onSuccess, onNavigateBack, onNavigateLogi
             {/* Phone Number Field */}
             <div>
               <label htmlFor="reg_phone" className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                Phone Number
+                Phone Number (Optional)
               </label>
               <div className="mt-1 relative rounded-md shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -257,7 +261,6 @@ export default function RegisterPage({ onSuccess, onNavigateBack, onNavigateLogi
                 <input
                   id="reg_phone"
                   type="tel"
-                  required
                   placeholder="e.g. +91 98765 43210"
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}

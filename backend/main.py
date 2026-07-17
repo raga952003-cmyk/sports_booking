@@ -37,9 +37,17 @@ class UserLoginSchema(BaseModel):
     employeeId: str
     password: Optional[str] = None
 
+class ForgotPasswordSchema(BaseModel):
+    employeeId: str
+
 class RoleUpdateSchema(BaseModel):
     userId: str
     role: str
+
+class PlayerInfoSchema(BaseModel):
+    employeeId: str
+    name: str
+    email: str
 
 class BookingCreateSchema(BaseModel):
     employeeId: str
@@ -47,6 +55,7 @@ class BookingCreateSchema(BaseModel):
     facilityId: str
     slotTime: str
     bookingSource: str  # online, security
+    additionalPlayers: Optional[List[PlayerInfoSchema]] = None
 
 class CancelBookingSchema(BaseModel):
     bookingId: str
@@ -111,6 +120,13 @@ def login_user(login: UserLoginSchema):
             
     return {"success": True, "user": user}
 
+@app.post("/api/users/forgot-password")
+def forgot_password(req: ForgotPasswordSchema):
+    result = db_mgr.forgot_password(req.employeeId)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
 @app.post("/api/users/role")
 def update_role(update: RoleUpdateSchema):
     success = db_mgr.update_user_role(update.userId, update.role)
@@ -136,6 +152,7 @@ def get_bookings():
 def create_booking(booking: BookingCreateSchema):
     result = db_mgr.create_booking(booking.model_dump())
     if not result["success"]:
+        print(f"[DEBUG API] /api/bookings error: {result['error']}")
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
@@ -143,6 +160,7 @@ def create_booking(booking: BookingCreateSchema):
 def cancel_booking(cancel: CancelBookingSchema):
     result = db_mgr.cancel_booking(cancel.bookingId)
     if not result["success"]:
+        print(f"[DEBUG API] /api/bookings/cancel error: {result['error']}")
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
@@ -154,6 +172,7 @@ def update_booking_status(status_update: UpdateBookingStatusSchema):
         status_update.verifiedBy
     )
     if not result["success"]:
+        print(f"[DEBUG API] /api/bookings/status error: {result['error']}")
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
@@ -201,3 +220,13 @@ def get_emails():
 def clear_emails():
     db_mgr.clear_simulated_emails()
     return {"success": True}
+
+# --- SIMULATED TIME ---
+@app.get("/api/simulated-time")
+def get_simulated_time():
+    return db_mgr.get_simulated_time()
+
+@app.post("/api/simulated-time")
+def set_simulated_time(time: TimeConfigSchema):
+    return db_mgr.set_simulated_time(time.hour, time.minute)
+

@@ -1,30 +1,15 @@
 version: '3.8'
 
 services:
-  backend:
-    build: ./backend
-    container_name: playsmart_backend
-    ports:
-      - "8000:8000"
-    environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-    volumes:
-      - ./backend:/app
-      - playsmart_db:/app/playsmart_sandbox.db # Persist SQLite fallback database inside docker volumes
-    restart: always
-
   frontend:
     build: ./frontend
     container_name: playsmart_frontend
     ports:
       - "3000:3000"
+    environment:
+      - VITE_SUPABASE_URL=${SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${SUPABASE_KEY}
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    depends_on:
-      - backend
     restart: always
-
-volumes:
-  playsmart_db:

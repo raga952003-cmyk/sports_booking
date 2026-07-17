@@ -4,7 +4,12 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { db, SimulatedTimeConfig } from '../lib/database';
+import { db } from '../lib/database';
+
+interface SimulatedTimeConfig {
+  hour: number;
+  minute: number;
+}
 import { Clock, ShieldAlert, CheckCircle, HelpCircle, Mail, X, Trash2 } from 'lucide-react';
 
 export default function SimulatedTimeHeader() {
@@ -21,6 +26,7 @@ export default function SimulatedTimeHeader() {
       const now = new Date();
       const currentTime = { hour: now.getHours(), minute: now.getMinutes() };
       setSimTime(currentTime);
+      await db.setSimulatedTime(currentTime);
       
       const allEmails = await db.getSimulatedEmails();
       setEmails(allEmails);
@@ -33,9 +39,11 @@ export default function SimulatedTimeHeader() {
     refreshData();
 
     // Update time every minute to show real current time
-    const timeInterval = setInterval(() => {
+    const timeInterval = setInterval(async () => {
       const now = new Date();
-      setSimTime({ hour: now.getHours(), minute: now.getMinutes() });
+      const currentTime = { hour: now.getHours(), minute: now.getMinutes() };
+      setSimTime(currentTime);
+      await db.setSimulatedTime(currentTime);
     }, 60000); // Update every minute
 
     const handleEmailSent = async () => {

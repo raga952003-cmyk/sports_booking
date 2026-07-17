@@ -17,22 +17,47 @@ import {
   Tooltip, Legend, LineChart, Line, PieChart, Pie, Cell 
 } from 'recharts';
 
+const THEMES = {
+  blue: { navBg: 'bg-[#003366]', primaryBtn: 'bg-[#003366] hover:bg-blue-900', text: 'text-[#003366]' },
+  dark: { navBg: 'bg-[#0f172a]', primaryBtn: 'bg-[#0f172a] hover:bg-slate-900', text: 'text-[#0f172a]' },
+  green: { navBg: 'bg-[#064e3b]', primaryBtn: 'bg-[#064e3b] hover:bg-emerald-900', text: 'text-[#064e3b]' },
+  purple: { navBg: 'bg-[#3b0764]', primaryBtn: 'bg-[#3b0764] hover:bg-fuchsia-900', text: 'text-[#3b0764]' }
+};
+
 interface AdminDashboardProps {
   user: User;
   onLogout: () => void;
+  onUpdateUser?: () => void;
 }
 
-export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
+export default function AdminDashboard({ user, onLogout, onUpdateUser }: AdminDashboardProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'analytics' | 'users' | 'facilities' | 'reports'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'users' | 'approvals' | 'facilities' | 'reports' | 'security'>('analytics');
   
   // Custom user role modifier
   const [selectedUserToEdit, setSelectedUserToEdit] = useState<string | null>(null);
   const [newUserRole, setNewUserRole] = useState<'employee' | 'security' | 'admin'>('employee');
+  const [approvalComments, setApprovalComments] = useState<Record<string, string>>({});
 
+  // Password change states
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  // Profile update states
+  const [profileName, setProfileName] = useState(user.name);
+  const [profileEmail, setProfileEmail] = useState(user.email);
+  const [profilePhone, setProfilePhone] = useState(user.phoneNumber || '');
+  const [profileAvatar, setProfileAvatar] = useState(user.avatar || '');
+  const [profileError, setProfileError] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+
+  // Theme state
+  const [theme, setTheme] = useState<'blue' | 'dark' | 'green' | 'purple'>((localStorage.getItem('playsmart_theme') as any) || 'blue');
   const refreshData = async () => {
     try {
       const [usersList, booksList, facsList, wlist] = await Promise.all([
@@ -52,7 +77,11 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
 
   useEffect(() => {
     refreshData();
-    const handleStorageUpdate = () => refreshData();
+    const handleStorageUpdate = () => {
+      refreshData();
+      const storedTheme = localStorage.getItem('playsmart_theme') || 'blue';
+      setTheme(storedTheme as any);
+    };
     window.addEventListener('storage', handleStorageUpdate);
 
     const interval = setInterval(() => {
@@ -80,8 +109,176 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     }
   };
 
+  const handleApproveUser = async (userId: string) => {
+    const comments = approvalComments[userId] || 'Welcome to the TCS PlaySmart platform!';
+    const success = await db.approveUserWithComments(userId, comments);
+    if (success) {
+      setApprovalComments(prev => {
+        const copy = { ...prev };
+        delete copy[userId];
+        return copy;
+      });
+      refreshData();
+      alert('User account approved and activated successfully.');
+    } else {
+      alert('Failed to approve user account.');
+    }
+  };
+
+  const handleRejectUser = async (userId: string) => {
+    const comments = approvalComments[userId] || '';
+    if (!comments.trim()) {
+      alert("A rejection reason/comment is required in the input field to notify the applicant.");
+      return;
+    }
+
+    const success = await db.rejectUser(userId, comments);
+    if (success) {
+      setApprovalComments(prev => {
+        const copy = { ...prev };
+        delete copy[userId];
+        return copy;
+      });
+      refreshData();
+      alert('User registration request rejected.');
+    } else {
+      alert('Failed to reject user.');
+    }
+  };
+
+  const handleToggleStatus = async (userId: string, currentStatus: 'active' | 'inactive') => {
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    const confirmToggle = window.confirm(`Are you sure you want to mark this user as ${newStatus.toUpperCase()}?`);
+    if (!confirmToggle) return;
+
+    const success = await db.toggleUserStatus(userId, newStatus);
+    if (success) {
+      refreshData();
+      alert(`User status updated to ${newStatus.toUpperCase()} successfully.`);
+    } else {
+      alert('Failed to update user status.');
+    }
+  };
+
+  const exportToExcel = () => {
+    const escapeCsv = (val: string) => {
+      const escaped = val.replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
+
+    let csvContent = "";
+    
+    // Title & Date
+    csvContent += `Daily Court Operations Audit,Date:,${new Date().toLocaleDateString()}\n\n`;
+    
+    // Metrics Section
+    csvContent += `METRIC,VALUE\n`;
+    csvContent += `Scheduled Slots,${activeBookingsCount}\n`;
+    csvContent += `Successful Check-Ins,${activePlayersCount}\n`;
+    csvContent += `No-Show Violations,${noShowsCount}\n`;
+    csvContent += `Waitlist Queue,${waitlist.length}\n`;
+    csvContent += `Utilization Efficiency,${courtUtilization}%\n\n`;
+    
+    // Live Sessions Section
+    csvContent += `LIVE SESSION LOGS (TODAY)\n`;
+    csvContent += `Booking ID,Employee Name,Employee ID,Sport,Court,Time Slot,Channel,Status\n`;
+    bookings.forEach(b => {
+      csvContent += `${escapeCsv(b.bookingId)},${escapeCsv(b.employeeName)},${escapeCsv(b.employeeId)},${escapeCsv(b.sport)},${escapeCsv(b.courtName)},${escapeCsv(b.slotTime)},${escapeCsv(b.bookingSource)},${escapeCsv(b.status)}\n`;
+    });
+    csvContent += `\n`;
+    
+    // Waitlist Section
+    csvContent += `ACTIVE WAITLIST QUEUE\n`;
+    csvContent += `Waitlist ID,Employee Name,Employee ID,Sport,Court,Time Slot,Requested At\n`;
+    waitlist.forEach(w => {
+      const timeStr = new Date(w.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      csvContent += `${escapeCsv(w.waitlistId)},${escapeCsv(w.employeeName)},${escapeCsv(w.employeeId)},${escapeCsv(w.sport)},${escapeCsv(w.courtName)},${escapeCsv(w.slotTime)},${escapeCsv(timeStr)}\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `campus_audit_report_${new Date().toISOString().slice(0,10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 250 * 1024) {
+        setProfileError('Profile picture must be under 250KB.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfileAvatar(reader.result as string);
+        setProfileError('');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccess('');
+
+    if (!profileName.trim()) return setProfileError('Name is required.');
+    const emailLower = profileEmail.trim().toLowerCase();
+    if (!emailLower.endsWith('@tcs.com') && !emailLower.endsWith('@gmail.com')) {
+      return setProfileError('Email must belong to tcs.com or gmail.com domains.');
+    }
+
+    const res = await db.updateUserProfile(
+      user.employeeId,
+      profileName.trim(),
+      emailLower,
+      profilePhone.trim(),
+      profileAvatar
+    );
+
+    if (res.success) {
+      setProfileSuccess('Profile details updated successfully!');
+      onUpdateUser?.();
+    } else {
+      setProfileError(res.error || 'Failed to update profile.');
+    }
+  };
+
+  const handleThemeChange = (newTheme: 'blue' | 'dark' | 'green' | 'purple') => {
+    setTheme(newTheme);
+    localStorage.setItem('playsmart_theme', newTheme);
+    window.dispatchEvent(new Event('storage'));
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    if (!currentPassword) return setPasswordError('Current password is required.');
+    if (newPassword.length < 6) return setPasswordError('New password must be at least 6 characters long.');
+    if (newPassword !== confirmPassword) return setPasswordError('New passwords do not match.');
+
+    const res = await db.changePassword(user.employeeId, currentPassword, newPassword);
+    if (res.success) {
+      setPasswordSuccess('Password updated successfully!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } else {
+      setPasswordError(res.error || 'Failed to update password.');
+    }
+  };
+
   // --- COMPUTE DYNAMIC METRICS (Section 16) ---
   const totalEmployeesCount = users.filter(u => u.role === 'employee').length;
+  const pendingUsers = users.filter(u => u.status === 'pending');
+  const activeUsers = users.filter(u => u.status === 'active' || u.status === 'inactive');
   const activeBookingsCount = bookings.filter(b => b.status !== 'cancelled').length;
   const totalSlotsCapacity = facilities.length * SLOT_TIMES.length; // 15 courts * 14 hours = 210 slots
   const availableSlotsCount = Math.max(0, totalSlotsCapacity - activeBookingsCount);
@@ -153,10 +350,10 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     <div id="admin_dashboard" className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col justify-between">
       <div className="grow">
         {/* Top Corporate Nav */}
-        <nav className="bg-[#003366] text-white py-3.5 px-4 sm:px-6 lg:px-8 shadow-sm">
+        <nav className={`${THEMES[theme]?.navBg || 'bg-[#003366]'} text-white py-3.5 px-4 sm:px-6 lg:px-8 shadow-sm transition-all duration-300`}>
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center font-bold italic text-white shadow-sm">P</div>
+              <div className="w-8 h-8 bg-white/10 rounded flex items-center justify-center font-bold italic text-white shadow-sm border border-white/15">P</div>
               <div>
                 <span className="font-display font-bold text-lg text-white block leading-tight">
                   PlaySmart Admin
@@ -168,9 +365,18 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="hidden sm:block text-right">
-                <span className="text-xs font-semibold block text-slate-100">{user.name}</span>
-                <span className="text-[10px] text-blue-200/80 font-mono block">Admin Console</span>
+              <div className="hidden sm:flex items-center gap-2 text-right">
+                {user.avatar ? (
+                  <img src={user.avatar} className="w-7 h-7 rounded-full object-cover border border-white/25 shadow-sm" alt="Avatar" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center font-bold text-xs text-white border border-white/25 shadow-sm">
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <span className="text-xs font-semibold block text-slate-100 text-left">{user.name}</span>
+                  <span className="text-[10px] text-blue-200/80 font-mono block text-left">Admin Console</span>
+                </div>
               </div>
 
               <button
@@ -207,6 +413,20 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
             <Users className="w-4 h-4" /> Manage Users
           </button>
           <button
+            id="admin_tab_approvals"
+            onClick={() => setActiveTab('approvals')}
+            className={`pb-3 px-4 font-display font-semibold text-sm border-b-2 cursor-pointer transition-all flex items-center gap-2 ${
+              activeTab === 'approvals' ? 'border-[#003366] text-[#003366]' : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Clock className="w-4 h-4" /> Pending Approvals
+            {pendingUsers.length > 0 && (
+              <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                {pendingUsers.length}
+              </span>
+            )}
+          </button>
+          <button
             id="admin_tab_facilities"
             onClick={() => setActiveTab('facilities')}
             className={`pb-3 px-4 font-display font-semibold text-sm border-b-2 cursor-pointer transition-all flex items-center gap-2 ${
@@ -223,6 +443,15 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
             }`}
           >
             <FileText className="w-4 h-4" /> Audit & Reports
+          </button>
+          <button
+            id="admin_tab_security"
+            onClick={() => setActiveTab('security')}
+            className={`pb-3 px-4 font-display font-semibold text-sm border-b-2 cursor-pointer transition-all flex items-center gap-2 ${
+              activeTab === 'security' ? 'border-[#003366] text-[#003366]' : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Settings className="w-4 h-4" /> Change Password
           </button>
         </div>
 
@@ -386,11 +615,12 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                     <th className="py-3 px-4">Phone Number</th>
                     <th className="py-3 px-4">Department / BU</th>
                     <th className="py-3 px-4">Role Permission</th>
+                    <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {users.map(u => (
+                  {activeUsers.map(u => (
                     <tr key={u.id} className="hover:bg-slate-50/50">
                       <td className="py-3 px-4 font-bold text-slate-900">{u.name}</td>
                       <td className="py-3 px-4 font-mono font-bold text-slate-700">{u.employeeId}</td>
@@ -408,22 +638,136 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                           {u.role.toUpperCase()}
                         </span>
                       </td>
+                      <td className="py-3 px-4">
+                        {u.status === 'inactive' ? (
+                          <span className="inline-block text-[10px] font-bold px-2.5 py-1 bg-rose-50 text-rose-700 rounded-full border border-rose-100">
+                            Inactive (Relieved)
+                          </span>
+                        ) : (
+                          <span className="inline-block text-[10px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+                            Active
+                          </span>
+                        )}
+                        {u.suspendedUntil && new Date(u.suspendedUntil) > new Date() && (
+                          <span className="block text-[9px] text-rose-500 font-bold font-mono mt-1 animate-pulse" title={`Suspended until ${new Date(u.suspendedUntil).toLocaleDateString()}`}>
+                            🚫 Penalty Active
+                          </span>
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-center">
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleChangeRole(u.id, e.target.value as any)}
-                          className="px-2 py-1 bg-slate-50 border border-slate-300 rounded text-[11px] font-semibold text-slate-700 focus:outline-none"
-                        >
-                          <option value="employee">Employee</option>
-                          <option value="security">Security</option>
-                          <option value="admin">Admin</option>
-                        </select>
+                        <div className="flex items-center justify-center gap-2">
+                          <select
+                            value={u.role}
+                            onChange={(e) => handleChangeRole(u.id, e.target.value as any)}
+                            className="px-2 py-1 bg-slate-50 border border-slate-300 rounded text-[11px] font-semibold text-slate-700 focus:outline-none focus:bg-white"
+                          >
+                            <option value="employee">Employee</option>
+                            <option value="security">Security</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                          <button
+                            onClick={() => handleToggleStatus(u.id, u.status || 'active')}
+                            className={`px-2.5 py-1 rounded-xl text-[10px] font-bold transition-all border cursor-pointer ${
+                              u.status === 'inactive' 
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
+                                : 'bg-rose-50 text-rose-600 border-rose-150 hover:bg-rose-100'
+                            }`}
+                          >
+                            {u.status === 'inactive' ? 'Activate' : 'Deactivate'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* PENDING APPROVALS VIEW */}
+        {activeTab === 'approvals' && (
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm animate-fade-in">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="font-display font-bold text-slate-900 text-lg">Staff Requisitions & Approvals</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Approve or reject pending System Administrator and Security Officer portal access requests.</p>
+              </div>
+              <button
+                onClick={refreshData}
+                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {pendingUsers.length === 0 ? (
+              <div className="p-12 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <CheckCircle className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-slate-700">No Pending Approvals</p>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">All administrator and security staff credentials have been verified and are active.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-600">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-400 font-bold uppercase tracking-wider">
+                      <th className="py-3 px-4">Applicant</th>
+                      <th className="py-3 px-4">Employee ID</th>
+                      <th className="py-3 px-4">Email</th>
+                      <th className="py-3 px-4">Department / BU</th>
+                      <th className="py-3 px-4">Requested Role</th>
+                      <th className="py-3 px-4">Decision Comments</th>
+                      <th className="py-3 px-4 text-center">Action Decision</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {pendingUsers.map(u => (
+                      <tr key={u.id} className="hover:bg-slate-50/50">
+                        <td className="py-3 px-4 font-bold text-slate-900">{u.name}</td>
+                        <td className="py-3 px-4 font-mono font-bold text-slate-700">{u.employeeId}</td>
+                        <td className="py-3 px-4 text-slate-500 font-medium">{u.email}</td>
+                        <td className="py-3 px-4 text-slate-500">
+                          {u.department} <span className="text-[10px] text-slate-400 block font-mono">{u.businessUnit}</span>
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-slate-800">
+                          <span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                            u.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {u.role.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="text"
+                            value={approvalComments[u.id] || ''}
+                            onChange={(e) => setApprovalComments(prev => ({ ...prev, [u.id]: e.target.value }))}
+                            placeholder="Reason for rejection or welcome note..."
+                            className="w-full min-w-[200px] px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-slate-400 focus:bg-white transition-all"
+                          />
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleApproveUser(u.id)}
+                              className="px-3 py-1.5 bg-[#003366] hover:bg-[#002244] text-white rounded-xl text-[10px] font-bold transition-all shadow-sm cursor-pointer uppercase tracking-wider"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleRejectUser(u.id)}
+                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-100 rounded-xl text-[10px] font-bold transition-all cursor-pointer uppercase tracking-wider"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -474,10 +818,10 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                 <p className="text-xs text-slate-500 mt-0.5">Compile daily usage metrics, check-in logs, and policy compliance records.</p>
               </div>
               <button
-                onClick={() => alert('Report generated and downloaded to virtual sandbox documents!')}
-                className="px-4 py-2 bg-purple-600 text-white text-xs font-bold rounded-xl hover:bg-purple-700 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                onClick={exportToExcel}
+                className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <Download className="w-4 h-4" /> Export PDF Report
+                <Download className="w-4 h-4" /> Export Excel Report
               </button>
             </div>
 
@@ -532,7 +876,9 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                           {bookings.map(b => (
                             <tr key={b.bookingId}>
                               <td className="py-2 font-mono text-slate-400">{b.bookingId}</td>
-                              <td className="py-2 font-bold text-slate-800">{b.employeeName} ({b.employeeId})</td>
+                              <td className="py-2 font-bold text-slate-800">
+                                {b.employeeName} ({b.employeeId})
+                              </td>
                               <td className="py-2 text-slate-700 font-medium">{b.sport} - {b.courtName}</td>
                               <td className="py-2 font-mono font-bold text-slate-600">{b.slotTime}</td>
                               <td className="py-2 capitalize font-mono text-[10px]">{b.bookingSource}</td>
@@ -591,6 +937,279 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'security' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* Left 2 Columns: Profile Details */}
+            <div className="lg:col-span-2 bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
+              <h3 className="font-display font-bold text-slate-900 text-lg mb-1">My Profile</h3>
+              <p className="text-xs text-slate-500 mb-6">Manage your personal details, profile picture, and corporate department settings.</p>
+
+              {profileError && (
+                <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">
+                  {profileError}
+                </div>
+              )}
+
+              {profileSuccess && (
+                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-xl">
+                  {profileSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleProfileUpdate} className="space-y-6">
+                {/* Profile Picture Upload */}
+                <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-slate-100">
+                  <div className="relative">
+                    {profileAvatar ? (
+                      <img src={profileAvatar} className="w-24 h-24 rounded-full object-cover border-4 border-slate-100 shadow-md" alt="Profile" />
+                    ) : (
+                      <div className="w-24 h-24 rounded-full bg-blue-100 text-[#003366] flex items-center justify-center font-bold text-3xl border-4 border-slate-100 shadow-md">
+                        {profileName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <label className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center cursor-pointer shadow-md hover:bg-slate-700 transition-colors">
+                      <Download className="w-4 h-4 rotate-180" />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleAvatarChange}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  <div className="text-center sm:text-left">
+                    <h4 className="font-bold text-slate-800 text-sm">Profile Picture</h4>
+                    <p className="text-xs text-slate-400 mt-1">PNG, JPG, or GIF. Max 250KB size limit.</p>
+                    {profileAvatar && (
+                      <button
+                        type="button"
+                        onClick={() => setProfileAvatar('')}
+                        className="mt-2 text-xs font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
+                      >
+                        Remove Picture
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950 font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={profileEmail}
+                      onChange={(e) => setProfileEmail(e.target.value)}
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950 font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                      Mobile Number
+                    </label>
+                    <input
+                      type="text"
+                      value={profilePhone}
+                      onChange={(e) => setProfilePhone(e.target.value)}
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950 font-medium"
+                      placeholder="Optional"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                      TCS Employee ID (Read-only)
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      value={user.employeeId}
+                      className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-400 font-mono font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                      Corporate Department (Read-only)
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      value={user.department}
+                      className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-400 font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                      Business Unit (Read-only)
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      value={user.businessUnit}
+                      className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-400 font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    className={`px-6 py-2.5 ${THEMES[theme]?.primaryBtn || 'bg-[#003366] hover:bg-blue-900'} text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm uppercase tracking-wider`}
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Right Column: Security & Preferences */}
+            <div className="space-y-8">
+              
+              {/* Security/Password Change Card */}
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                <h3 className="font-display font-bold text-slate-900 text-sm mb-1">Change Password</h3>
+                <p className="text-[11px] text-slate-500 mb-4">Ensure your account uses a secure password phrase.</p>
+
+                {passwordError && (
+                  <div className="mb-3 p-2 bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-semibold rounded-lg">
+                    {passwordError}
+                  </div>
+                )}
+
+                {passwordSuccess && (
+                  <div className="mb-3 p-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold rounded-lg">
+                    {passwordSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handlePasswordChange} className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                      Current Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      className="block w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950"
+                      placeholder="Enter current password"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                      New Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="block w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950"
+                      placeholder="At least 6 characters"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="block w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950"
+                      placeholder="Repeat new password"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className={`w-full mt-1 py-2 ${THEMES[theme]?.primaryBtn || 'bg-[#003366] hover:bg-blue-900'} text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer shadow-sm uppercase tracking-wider`}
+                  >
+                    Update Password
+                  </button>
+                </form>
+              </div>
+
+              {/* Theme Preferences Card */}
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                <h3 className="font-display font-bold text-slate-900 text-sm mb-1">Portal Theme Preferences</h3>
+                <p className="text-[11px] text-slate-500 mb-4">Choose a color layout signature for your workspace header.</p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('blue')}
+                    className={`p-3 rounded-2xl border text-center flex flex-col items-center gap-1.5 cursor-pointer transition-all ${
+                      theme === 'blue' ? 'border-[#003366] bg-blue-50/40 text-[#003366] font-bold' : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                    }`}
+                  >
+                    <div className="w-6 h-6 rounded-full bg-[#003366] border border-white/20 shadow-sm"></div>
+                    <span className="text-[10px]">TCS Blue</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('dark')}
+                    className={`p-3 rounded-2xl border text-center flex flex-col items-center gap-1.5 cursor-pointer transition-all ${
+                      theme === 'dark' ? 'border-slate-800 bg-slate-50 text-slate-950 font-bold' : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                    }`}
+                  >
+                    <div className="w-6 h-6 rounded-full bg-[#0f172a] border border-white/20 shadow-sm"></div>
+                    <span className="text-[10px]">Midnight</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('green')}
+                    className={`p-3 rounded-2xl border text-center flex flex-col items-center gap-1.5 cursor-pointer transition-all ${
+                      theme === 'green' ? 'border-[#064e3b] bg-emerald-50/40 text-[#064e3b] font-bold' : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                    }`}
+                  >
+                    <div className="w-6 h-6 rounded-full bg-[#064e3b] border border-white/20 shadow-sm"></div>
+                    <span className="text-[10px]">Emerald</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('purple')}
+                    className={`p-3 rounded-2xl border text-center flex flex-col items-center gap-1.5 cursor-pointer transition-all ${
+                      theme === 'purple' ? 'border-[#3b0764] bg-fuchsia-50/40 text-[#3b0764] font-bold' : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                    }`}
+                  >
+                    <div className="w-6 h-6 rounded-full bg-[#3b0764] border border-white/20 shadow-sm"></div>
+                    <span className="text-[10px]">Royal Purple</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
           </div>
         )}
 

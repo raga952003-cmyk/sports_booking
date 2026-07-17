@@ -15,6 +15,11 @@ export interface User {
   businessUnit: string;
   role: UserRole;
   password?: string;
+  avatar?: string;
+  approved?: boolean;
+  status?: 'active' | 'inactive' | 'pending' | 'rejected';
+  suspendedUntil?: string;
+  rejectionReason?: string;
   createdAt: string;
 }
 
@@ -58,6 +63,7 @@ export interface Booking {
   bookingSource: BookingSource;
   status: BookingStatus;
   createdAt: string;
+  additionalPlayers?: Array<{ employeeId: string; name: string; email: string }>;
 }
 
 export interface Attendance {

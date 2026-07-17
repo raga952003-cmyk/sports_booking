@@ -10,12 +10,20 @@ import { SLOT_TIMES } from '../data/initialData';
 import { Shield, Search, QrCode, UserCheck, XOctagon, Calendar, CheckSquare, RefreshCw, AlertTriangle, Play, HelpCircle, Camera, Check, CheckCircle2, AlertCircle, ArrowLeft, X, Printer, Sparkles } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import QRCodeSVG from './QRCodeSVG';
+const THEMES = {
+  blue: { navBg: 'bg-[#003366]', primaryBtn: 'bg-[#003366] hover:bg-blue-900', text: 'text-[#003366]' },
+  dark: { navBg: 'bg-[#0f172a]', primaryBtn: 'bg-[#0f172a] hover:bg-slate-900', text: 'text-[#0f172a]' },
+  green: { navBg: 'bg-[#064e3b]', primaryBtn: 'bg-[#064e3b] hover:bg-emerald-900', text: 'text-[#064e3b]' },
+  purple: { navBg: 'bg-[#3b0764]', primaryBtn: 'bg-[#3b0764] hover:bg-fuchsia-900', text: 'text-[#3b0764]' }
+};
+
 interface SecurityDashboardProps {
   user: User;
   onLogout: () => void;
+  onUpdateUser?: () => void;
 }
 
-export default function SecurityDashboard({ user, onLogout }: SecurityDashboardProps) {
+export default function SecurityDashboard({ user, onLogout, onUpdateUser }: SecurityDashboardProps) {
   const [employees, setEmployees] = useState<User[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -24,6 +32,15 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
   // Assisted booking state
   const [bookingEmployeeId, setBookingEmployeeId] = useState('');
   const [bookingEmail, setBookingEmail] = useState('');
+  const [p2EmpId, setP2EmpId] = useState('');
+  const [p2Name, setP2Name] = useState('');
+  const [p2Email, setP2Email] = useState('');
+  const [p3EmpId, setP3EmpId] = useState('');
+  const [p3Name, setP3Name] = useState('');
+  const [p3Email, setP3Email] = useState('');
+  const [p4EmpId, setP4EmpId] = useState('');
+  const [p4Name, setP4Name] = useState('');
+  const [p4Email, setP4Email] = useState('');
   const [bookingSport, setBookingSport] = useState<SportType>('Badminton');
   const [selectedAvailableSport, setSelectedAvailableSport] = useState<SportType>('Badminton');
   const [bookingFacilityId, setBookingFacilityId] = useState('');
@@ -40,6 +57,24 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
   const [generatedQrBooking, setGeneratedQrBooking] = useState<Booking | null>(null);
   const [simTime, setSimTime] = useState({ hour: 9, minute: 0 });
   const [scannerSearchQuery, setScannerSearchQuery] = useState('');
+
+  // Profile settings modal states
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+
+  const [profileName, setProfileName] = useState(user.name);
+  const [profileEmail, setProfileEmail] = useState(user.email);
+  const [profilePhone, setProfilePhone] = useState(user.phoneNumber || '');
+  const [profileAvatar, setProfileAvatar] = useState(user.avatar || '');
+  const [profileError, setProfileError] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+
+  // Theme state
+  const [theme, setTheme] = useState<'blue' | 'dark' | 'green' | 'purple'>((localStorage.getItem('playsmart_theme') as any) || 'blue');
 
   // Active filter for bookings list
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'checked_in' | 'no_show'>('all');
@@ -63,7 +98,11 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
 
   useEffect(() => {
     refreshData();
-    const handleStorageUpdate = () => refreshData();
+    const handleStorageUpdate = () => {
+      refreshData();
+      const storedTheme = localStorage.getItem('playsmart_theme') || 'blue';
+      setTheme(storedTheme as any);
+    };
     const handleTimeChange = async () => {
       const time = await db.getSimulatedTime();
       setSimTime(time);
@@ -131,13 +170,17 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
       email: bookingEmail.trim().toLowerCase(),
       facilityId: bookingFacilityId,
       slotTime: bookingSlot,
-      bookingSource: 'security' // Crucial: source is security desk
+      bookingSource: 'security', // Crucial: source is security desk
     });
 
     if (result.success) {
-      setBookingSuccessMessage(`Successfully booked slot for Employee ${bookingEmployeeId.toUpperCase()}! A confirmation email has been triggered to ${bookingEmail.trim().toLowerCase()}.`);
+      const msg = `Successfully booked slot for Employee ${bookingEmployeeId.toUpperCase()}! A confirmation email has been triggered to ${bookingEmail.trim().toLowerCase()}.`;
+      setBookingSuccessMessage(msg);
       setBookingEmployeeId('');
       setBookingEmail('');
+      setP2EmpId(''); setP2Name(''); setP2Email('');
+      setP3EmpId(''); setP3Name(''); setP3Email('');
+      setP4EmpId(''); setP4Name(''); setP4Email('');
       refreshData();
     } else {
       setBookingError(result.error || 'Failed to complete booking.');
@@ -219,6 +262,75 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
     return 'none';
   };
 
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 250 * 1024) {
+        setProfileError('Profile picture must be under 250KB.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfileAvatar(reader.result as string);
+        setProfileError('');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccess('');
+
+    if (!profileName.trim()) return setProfileError('Name is required.');
+    const emailLower = profileEmail.trim().toLowerCase();
+    if (!emailLower.endsWith('@tcs.com') && !emailLower.endsWith('@gmail.com')) {
+      return setProfileError('Email must belong to tcs.com or gmail.com domains.');
+    }
+
+    const res = await db.updateUserProfile(
+      user.employeeId,
+      profileName.trim(),
+      emailLower,
+      profilePhone.trim(),
+      profileAvatar
+    );
+
+    if (res.success) {
+      setProfileSuccess('Profile details updated successfully!');
+      onUpdateUser?.();
+    } else {
+      setProfileError(res.error || 'Failed to update profile.');
+    }
+  };
+
+  const handleThemeChange = (newTheme: 'blue' | 'dark' | 'green' | 'purple') => {
+    setTheme(newTheme);
+    localStorage.setItem('playsmart_theme', newTheme);
+    window.dispatchEvent(new Event('storage'));
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    if (!currentPassword) return setPasswordError('Current password is required.');
+    if (newPassword.length < 6) return setPasswordError('New password must be at least 6 characters long.');
+    if (newPassword !== confirmPassword) return setPasswordError('New passwords do not match.');
+
+    const res = await db.changePassword(user.employeeId, currentPassword, newPassword);
+    if (res.success) {
+      setPasswordSuccess('Password updated successfully!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } else {
+      setPasswordError(res.error || 'Failed to update password.');
+    }
+  };
+
   const handleStatusUpdate = async (bookingId: string, status: 'checked_in' | 'no_show' | 'cancelled') => {
     const res = await db.updateBookingStatus(bookingId, status, user.employeeId);
     if (res.success) {
@@ -250,10 +362,10 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
     <div id="security_dashboard" className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col justify-between">
       <div className="grow">
         {/* Top Header Navigation */}
-        <nav className="bg-[#003366] text-white py-3.5 px-4 sm:px-6 lg:px-8 shadow-sm">
+        <nav className={`${THEMES[theme]?.navBg || 'bg-[#003366]'} text-white py-3.5 px-4 sm:px-6 lg:px-8 shadow-sm transition-all duration-300`}>
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center font-bold italic text-white shadow-sm">P</div>
+              <div className="w-8 h-8 bg-white/10 rounded flex items-center justify-center font-bold italic text-white shadow-sm border border-white/15">P</div>
               <div>
                 <span className="font-display font-extrabold text-lg text-white block leading-tight">
                   PlaySmart Gatekeeper
@@ -269,9 +381,23 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
                 <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
                 <span className="text-xs text-blue-100 font-medium">Security Gate Scanner Online</span>
               </div>
-              <div className="hidden sm:block text-right">
-                <span className="text-xs font-semibold block text-slate-100">{user.name}</span>
-                <span className="text-[10px] text-blue-200/80 font-mono block">Officer ID: {user.employeeId}</span>
+              
+              <div
+                onClick={() => setIsSettingsOpen(true)}
+                className="hidden sm:flex items-center gap-2 text-right cursor-pointer hover:opacity-85 transition-opacity"
+                title="View Profile & Settings"
+              >
+                {user.avatar ? (
+                  <img src={user.avatar} className="w-7 h-7 rounded-full object-cover border border-white/25 shadow-sm" alt="Avatar" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center font-bold text-xs text-white border border-white/25 shadow-sm">
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <span className="text-xs font-semibold block text-slate-100 text-left">{user.name}</span>
+                  <span className="text-[10px] text-blue-200/80 font-mono block text-left">Officer ID: {user.employeeId}</span>
+                </div>
               </div>
 
               <button
@@ -406,7 +532,7 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
 
             {/* 2. Assisted Booking Creation Form or Available Slots Explorer (Section 14) */}
             <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
-              {simTime.hour < 5 || simTime.hour >= 10 ? (
+              {false ? ( // Security desk has 24/7 booking capability
                 /* Frozen View: ONLY SEE AVAILABLE SLOTS */
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -703,8 +829,12 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
                     <div key={b.bookingId} className="border border-slate-200 p-4 rounded-2xl bg-white hover:border-slate-300 transition-all text-xs">
                       <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
                         <div>
-                          <p className="font-bold text-slate-950">{b.employeeName}</p>
-                          <p className="text-[10px] font-mono text-slate-500">{b.employeeId}</p>
+                          <p className="font-bold text-slate-950">
+                            {b.employeeName}
+                          </p>
+                          <p className="text-[10px] font-mono text-slate-500">
+                            Employee ID: {b.employeeId}
+                          </p>
                         </div>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono uppercase ${
                           b.status === 'checked_in' ? 'bg-amber-100 text-amber-800' :
@@ -1133,6 +1263,264 @@ export default function SecurityDashboard({ user, onLogout }: SecurityDashboardP
               </button>
             </div>
           </div>
+        </div>
+      </div>
+    )}
+
+    {/* Profile & Settings Modal Dialog */}
+    {isSettingsOpen && (
+      <div id="security_settings_modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in text-slate-800">
+        <div className="bg-white rounded-3xl max-w-4xl w-full border border-slate-200 shadow-2xl overflow-hidden animate-scale-in flex flex-col md:flex-row">
+          
+          {/* Left Panel: Profile Details */}
+          <div className="flex-1 p-8 border-b md:border-b-0 md:border-r border-slate-200">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="font-display font-bold text-slate-900 text-lg">My Profile</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Manage your officer details and credentials.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                  setProfileError('');
+                  setProfileSuccess('');
+                }}
+                className="text-slate-400 hover:text-slate-650 font-bold md:hidden"
+              >
+                ✕
+              </button>
+            </div>
+
+            {profileError && (
+              <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">
+                {profileError}
+              </div>
+            )}
+
+            {profileSuccess && (
+              <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-xl">
+                {profileSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleProfileUpdate} className="space-y-4">
+              {/* Profile Picture Upload */}
+              <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+                <div className="relative">
+                  {profileAvatar ? (
+                    <img src={profileAvatar} className="w-16 h-16 rounded-full object-cover border border-slate-200 shadow" alt="Profile" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-blue-100 text-[#003366] flex items-center justify-center font-bold text-xl border border-slate-200 shadow">
+                      {profileName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <label className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-slate-800 text-white flex items-center justify-center cursor-pointer shadow hover:bg-slate-700 transition-colors">
+                    <Download className="w-3.5 h-3.5 rotate-180" />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarChange}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-850 text-xs">Profile Picture</h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">PNG or JPG. Max 250KB.</p>
+                  {profileAvatar && (
+                    <button
+                      type="button"
+                      onClick={() => setProfileAvatar('')}
+                      className="text-[10px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer block mt-1"
+                    >
+                      Remove Picture
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    className="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={profileEmail}
+                    onChange={(e) => setProfileEmail(e.target.value)}
+                    className="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                    Mobile Number
+                  </label>
+                  <input
+                    type="text"
+                    value={profilePhone}
+                    onChange={(e) => setProfilePhone(e.target.value)}
+                    className="block w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-950 font-medium"
+                    placeholder="Optional"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Security ID (Read-only)
+                  </label>
+                  <input
+                    type="text"
+                    disabled
+                    value={user.employeeId}
+                    className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-400 font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4">
+                <button
+                  type="submit"
+                  className={`px-5 py-2 ${THEMES[theme]?.primaryBtn || 'bg-[#003366] hover:bg-blue-900'} text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm uppercase tracking-wider`}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Right Panel: Password & Theme Preferences */}
+          <div className="w-full md:w-[320px] bg-slate-50/60 p-8 flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-display font-bold text-slate-900 text-base">Security & Preferences</h3>
+              <button
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                  setPasswordError('');
+                  setPasswordSuccess('');
+                }}
+                className="text-slate-400 hover:text-slate-600 font-bold hidden md:block"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-6 grow">
+              {/* Password Change Sub-section */}
+              <div>
+                <h4 className="font-bold text-slate-800 text-xs mb-2">Change Password</h4>
+                {passwordError && (
+                  <div className="mb-2.5 p-2 bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-semibold rounded-lg">
+                    {passwordError}
+                  </div>
+                )}
+                {passwordSuccess && (
+                  <div className="mb-2.5 p-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold rounded-lg">
+                    {passwordSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handlePasswordChange} className="space-y-2">
+                  <input
+                    type="password"
+                    required
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="block w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-950"
+                    placeholder="Current Password"
+                  />
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="block w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-950"
+                    placeholder="New Password (6+ chars)"
+                  />
+                  <input
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="block w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-950"
+                    placeholder="Confirm New Password"
+                  />
+                  <button
+                    type="submit"
+                    className={`w-full py-2 ${THEMES[theme]?.primaryBtn || 'bg-[#003366] hover:bg-blue-900'} text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer shadow-sm uppercase tracking-wider`}
+                  >
+                    Update Password
+                  </button>
+                </form>
+              </div>
+
+              {/* Theme Preferences Sub-section */}
+              <div className="border-t border-slate-200 pt-4">
+                <h4 className="font-bold text-slate-800 text-xs mb-2">Gatekeeper Header Theme</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('blue')}
+                    className={`p-2 rounded-xl border text-center flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                      theme === 'blue' ? 'border-[#003366] bg-blue-50 text-[#003366] font-bold' : 'border-slate-200 bg-white text-slate-600'
+                    }`}
+                  >
+                    <div className="w-4 h-4 rounded-full bg-[#003366] border border-white/20 shadow-sm"></div>
+                    <span className="text-[9px]">TCS Blue</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('dark')}
+                    className={`p-2 rounded-xl border text-center flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                      theme === 'dark' ? 'border-slate-850 bg-slate-100 text-slate-950 font-bold' : 'border-slate-200 bg-white text-slate-600'
+                    }`}
+                  >
+                    <div className="w-4 h-4 rounded-full bg-[#0f172a] border border-white/20 shadow-sm"></div>
+                    <span className="text-[9px]">Midnight</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('green')}
+                    className={`p-2 rounded-xl border text-center flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                      theme === 'green' ? 'border-[#064e3b] bg-emerald-50 text-[#064e3b] font-bold' : 'border-slate-200 bg-white text-slate-600'
+                    }`}
+                  >
+                    <div className="w-4 h-4 rounded-full bg-[#064e3b] border border-white/20 shadow-sm"></div>
+                    <span className="text-[9px]">Emerald</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('purple')}
+                    className={`p-2 rounded-xl border text-center flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                      theme === 'purple' ? 'border-[#3b0764] bg-fuchsia-50 text-[#3b0764] font-bold' : 'border-slate-200 bg-white text-slate-600'
+                    }`}
+                  >
+                    <div className="w-4 h-4 rounded-full bg-[#3b0764] border border-white/20 shadow-sm"></div>
+                    <span className="text-[9px]">Purple</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
         </div>
       </div>
     )}

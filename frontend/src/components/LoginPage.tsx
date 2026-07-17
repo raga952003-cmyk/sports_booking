@@ -12,9 +12,10 @@ interface LoginPageProps {
   onNavigateBack: () => void;
   onNavigateRegister: () => void;
   onOpenAdminSetup?: () => void;
+  restrictRole?: 'admin' | 'security' | 'employee';
 }
 
-export default function LoginPage({ onSuccess, onNavigateBack, onNavigateRegister, onOpenAdminSetup }: LoginPageProps) {
+export default function LoginPage({ onSuccess, onNavigateBack, onNavigateRegister, onOpenAdminSetup, restrictRole }: LoginPageProps) {
   const [employeeId, setEmployeeId] = useState('');
   const [password, setPassword] = useState(''); 
   const [error, setError] = useState('');
@@ -34,10 +35,50 @@ export default function LoginPage({ onSuccess, onNavigateBack, onNavigateRegiste
     }
 
     const result = await db.loginUser(employeeId, password);
-    if (result.success) {
+    if (result.success && result.user) {
+      const activeRole = restrictRole || 'employee';
+      if (result.user.role !== activeRole) {
+        db.logoutUser();
+        if (activeRole === 'admin') {
+          setError('This login portal is restricted to Administrator accounts only.');
+        } else if (activeRole === 'security') {
+          setError('This login portal is restricted to Security personnel only.');
+        } else {
+          setError('This login portal is restricted to Employee Hub users. Please use your role-specific URL.');
+        }
+        return;
+      }
       onSuccess();
     } else {
       setError(result.error || 'Login failed.');
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (restrictRole === 'admin') {
+      const email = prompt("Forgot Admin credentials? Please enter your registered Administrator Email Address:");
+      if (!email) return;
+
+      setError('');
+      const res = await db.recoverAdminCredentials(email);
+      if (res.success) {
+        alert(`Admin Credentials Recovery Successful!\n\nA simulated recovery email has been sent to ${email} containing your TCS Employee ID and temporary password details. Click the "Outbox Log" button in the simulated header to view it.`);
+        window.dispatchEvent(new Event('simulated_email_sent'));
+      } else {
+        setError(res.error || 'Recovery failed.');
+      }
+    } else {
+      const empId = prompt("Please enter your TCS Employee ID to recover your password:");
+      if (!empId) return;
+      
+      setError('');
+      const res = await db.forgotPassword(empId);
+      if (res.success) {
+        alert(`Password recovery request successful!\n\nA simulated recovery email has been dispatched. Click the "Outbox Log" button in the simulated header to view it.`);
+        window.dispatchEvent(new Event('simulated_email_sent'));
+      } else {
+        setError(res.error || 'Password recovery failed.');
+      }
     }
   };
 
@@ -52,22 +93,30 @@ export default function LoginPage({ onSuccess, onNavigateBack, onNavigateRegiste
           <ChevronLeft className="w-4 h-4" /> Back to home
         </button>
         <div className="flex items-center justify-center gap-3 mb-4">
-          <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center font-bold italic text-white shadow-sm">P</div>
+          <img src="/tcs_logo.png" className="h-8 object-contain" alt="TCS Logo" />
           <span className="text-xl font-bold tracking-tight text-[#003366] font-display">PlaySmart</span>
           <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-[9px] font-semibold uppercase tracking-wider font-sans">Campus Hub</span>
         </div>
         <h2 className="text-center text-2xl font-display font-extrabold text-slate-900 tracking-tight">
-          Login to TCS PlaySmart
+          {restrictRole === 'admin' ? 'TCS PlaySmart Admin Portal' : 
+           restrictRole === 'security' ? 'TCS Security Gatekeeper' : 
+           'Login to TCS PlaySmart'}
         </h2>
         <p className="mt-2 text-center text-sm text-slate-500">
-          Or{' '}
-          <button
-            id="login_to_register_btn"
-            onClick={onNavigateRegister}
-            className="font-semibold text-blue-600 hover:text-blue-500 cursor-pointer"
-          >
-            register a new employee account
-          </button>
+          {(!restrictRole || restrictRole === 'employee') ? (
+            <>
+              Or{' '}
+              <button
+                id="login_to_register_btn"
+                onClick={onNavigateRegister}
+                className="font-semibold text-blue-600 hover:text-blue-500 cursor-pointer"
+              >
+                register a new employee account
+              </button>
+            </>
+          ) : (
+            <span className="font-mono text-xs text-slate-400 uppercase tracking-widest font-bold">Authorized Staff Login Only</span>
+          )}
         </p>
       </div>
 
@@ -139,8 +188,8 @@ export default function LoginPage({ onSuccess, onNavigateBack, onNavigateRegiste
                 <button
                   type="button"
                   id="forgot_pwd_btn"
-                  onClick={() => alert("Mock password bypass: All simulated passwords are set to 'password'")}
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-500"
+                  onClick={handleForgotPassword}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-500 cursor-pointer"
                 >
                   Forgot Password?
                 </button>

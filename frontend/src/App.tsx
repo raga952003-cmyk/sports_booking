@@ -20,12 +20,23 @@ export default function App() {
   const [screen, setScreen] = useState<'landing' | 'login' | 'register'>('landing');
   const [isAdminSetupOpen, setIsAdminSetupOpen] = useState(false);
   const [hasAdmin, setHasAdmin] = useState(false);
+  const [currentHash, setCurrentHash] = useState(window.location.hash);
 
   // Load user session on start
   const refreshUser = () => {
     const user = db.getCurrentUser();
     setCurrentUser(user);
     db.hasAdmin().then(res => setHasAdmin(res)).catch(() => setHasAdmin(false));
+    
+    if (user) {
+      if (user.role === 'admin' && window.location.hash !== '#/admin') {
+        window.location.hash = '#/admin';
+      } else if (user.role === 'security' && window.location.hash !== '#/security') {
+        window.location.hash = '#/security';
+      } else if (user.role === 'employee' && !window.location.hash.startsWith('#/employee') && !window.location.hash.startsWith('#/availability')) {
+        window.location.hash = '#/employee';
+      }
+    }
   };
 
   useEffect(() => {
@@ -36,9 +47,16 @@ export default function App() {
       refreshUser();
     };
 
+    const handleHashChange = () => {
+      setCurrentHash(window.location.hash);
+    };
+
     window.addEventListener('storage', handleStorageUpdate);
+    window.addEventListener('hashchange', handleHashChange);
+    
     return () => {
       window.removeEventListener('storage', handleStorageUpdate);
+      window.removeEventListener('hashchange', handleHashChange);
     };
   }, []);
 
@@ -50,6 +68,7 @@ export default function App() {
     db.logoutUser();
     setCurrentUser(null);
     setScreen('landing');
+    window.location.hash = '#/';
   };
 
   // Render the appropriate panel based on auth and role
@@ -61,6 +80,7 @@ export default function App() {
             <EmployeeDashboard 
               user={currentUser} 
               onLogout={handleLogout} 
+              onUpdateUser={refreshUser}
             />
           );
         case 'security':
@@ -68,6 +88,7 @@ export default function App() {
             <SecurityDashboard 
               user={currentUser} 
               onLogout={handleLogout} 
+              onUpdateUser={refreshUser}
             />
           );
         case 'admin':
@@ -75,6 +96,7 @@ export default function App() {
             <AdminDashboard 
               user={currentUser} 
               onLogout={handleLogout} 
+              onUpdateUser={refreshUser}
             />
           );
         default:
@@ -92,7 +114,44 @@ export default function App() {
       }
     }
 
-    // Unauthenticated Screens
+    // Unauthenticated Screens - Hash routing overrides screen state
+    if (currentHash === '#/admin') {
+      return (
+        <LoginPage 
+          onSuccess={handleAuthSuccess} 
+          onNavigateBack={() => { window.location.hash = '#/'; setScreen('landing'); }} 
+          onNavigateRegister={() => { window.location.hash = '#/'; setScreen('register'); }} 
+          onOpenAdminSetup={() => setIsAdminSetupOpen(true)}
+          restrictRole="admin"
+        />
+      );
+    }
+
+    if (currentHash === '#/security') {
+      return (
+        <LoginPage 
+          onSuccess={handleAuthSuccess} 
+          onNavigateBack={() => { window.location.hash = '#/'; setScreen('landing'); }} 
+          onNavigateRegister={() => { window.location.hash = '#/'; setScreen('register'); }} 
+          onOpenAdminSetup={() => setIsAdminSetupOpen(true)}
+          restrictRole="security"
+        />
+      );
+    }
+
+    if (currentHash === '#/employee') {
+      return (
+        <LoginPage 
+          onSuccess={handleAuthSuccess} 
+          onNavigateBack={() => { window.location.hash = '#/'; setScreen('landing'); }} 
+          onNavigateRegister={() => { window.location.hash = '#/'; setScreen('register'); }} 
+          onOpenAdminSetup={() => setIsAdminSetupOpen(true)}
+          restrictRole="employee"
+        />
+      );
+    }
+
+    // Standard Landing/Register/Login screens based on state
     switch (screen) {
       case 'login':
         return (
@@ -101,6 +160,7 @@ export default function App() {
             onNavigateBack={() => setScreen('landing')} 
             onNavigateRegister={() => setScreen('register')} 
             onOpenAdminSetup={() => setIsAdminSetupOpen(true)}
+            restrictRole="employee"
           />
         );
       case 'register':
@@ -115,7 +175,13 @@ export default function App() {
       default:
         return (
           <LandingPage 
-            onNavigate={(target) => setScreen(target)} 
+            onNavigate={(target) => {
+              if (target === 'login') {
+                window.location.hash = '#/employee';
+              } else {
+                setScreen(target);
+              }
+            }} 
             onOpenAdminSetup={() => setIsAdminSetupOpen(true)}
           />
         );

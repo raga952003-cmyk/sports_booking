@@ -42,7 +42,7 @@ export default function LandingPage({ onNavigate, onOpenAdminSetup }: LandingPag
       <header className="bg-[#003366] text-white sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center font-bold italic text-white shadow-sm">P</div>
+            <img src="/tcs_logo.png" className="h-8 object-contain" alt="TCS Logo" />
             <span className="text-xl font-bold tracking-tight font-display">PlaySmart</span>
             <span className="ml-2 px-2 py-0.5 bg-white/10 rounded text-[10px] font-semibold uppercase tracking-wider border border-white/20">Campus Hub</span>
           </div>
@@ -177,7 +177,7 @@ export default function LandingPage({ onNavigate, onOpenAdminSetup }: LandingPag
               <div key={sport} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center text-center">
                 <span className="text-4xl mb-3" role="img" aria-label={sport}>{sportIcons[sport] || '🏆'}</span>
                 <h4 className="font-display font-bold text-slate-900 text-sm">{sport}</h4>
-                <p className="text-xs text-slate-400 mt-1 font-mono">{count} {count > 1 ? 'Units' : 'Unit'}</p>
+                <p className="text-xs text-slate-400 mt-1 font-mono">{(count as number)} {(count as number) > 1 ? 'Units' : 'Unit'}</p>
               </div>
             ))}
           </div>
@@ -187,57 +187,24 @@ export default function LandingPage({ onNavigate, onOpenAdminSetup }: LandingPag
       {/* Contact Section */}
       <section id="contact" className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-blue-600 rounded-3xl p-8 md:p-12 text-white grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-            <div>
-              <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight mb-4">Need Help or Have Concerns?</h2>
-              <p className="text-blue-100 text-sm mb-6 max-w-md">
-                Reach out to the TCS Chennai Sports Committee or physical campus helpdesk at Siruseri Tech Park.
-              </p>
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center gap-3">
-                  <MapPin className="w-5 h-5 text-sky-300 shrink-0" />
-                  <span>Siruseri Campus, TCS Chennai, Tamil Nadu, India</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Phone className="w-5 h-5 text-sky-300 shrink-0" />
-                  <span>+91 44 6616 8888 (Extn. 200)</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Mail className="w-5 h-5 text-sky-300 shrink-0" />
-                  <span>playsmart.support@tcs.com</span>
-                </div>
+          <div className="bg-blue-600 rounded-3xl p-8 md:p-12 text-white text-center max-w-4xl mx-auto">
+            <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight mb-4">Need Help or Have Concerns?</h2>
+            <p className="text-blue-100 text-sm mb-8 max-w-xl mx-auto">
+              Reach out to the TCS Chennai Sports Committee or physical campus helpdesk at Siruseri Tech Park.
+            </p>
+            <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-10 text-sm">
+              <div className="flex items-center gap-3">
+                <MapPin className="w-5 h-5 text-sky-300 shrink-0" />
+                <span>Siruseri Campus, TCS Chennai, Tamil Nadu, India</span>
               </div>
-            </div>
-            <div className="bg-blue-700/50 p-6 rounded-2xl border border-blue-500/30">
-              <h3 className="font-display font-semibold text-lg mb-2">Getting Started</h3>
-              <p className="text-xs text-blue-100 mb-4">
-                All pre-seeded default accounts have been removed for absolute security. 
-                Please register a new account to get started with the PlaySmart portal.
-              </p>
-              
-              {!hasAdmin ? (
-                <div className="bg-blue-950/40 p-4 rounded-xl border border-amber-500/30 flex flex-col gap-2">
-                  <p className="text-amber-300 font-bold text-xs flex items-center gap-1">⚙️ No Administrator Found</p>
-                  <p className="text-slate-300 text-[11px] leading-relaxed">
-                    Set up your secure, manual, custom Administrator credentials to unlock fully functional analytics, system policies, and audit logs.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={onOpenAdminSetup}
-                    className="w-full text-center mt-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-lg transition-all cursor-pointer"
-                  >
-                    Setup First Admin Account
-                  </button>
-                </div>
-              ) : (
-                <div className="bg-blue-950/40 p-3.5 rounded-xl border border-emerald-500/30 flex items-center gap-2 text-xs">
-                  <span className="text-emerald-400">🛡️</span>
-                  <div>
-                    <p className="text-emerald-300 font-semibold font-display">Administrator Initialized</p>
-                    <p className="text-slate-300 text-[11px]">Login with your custom Admin ID to configure policies.</p>
-                  </div>
-                </div>
-              )}
+              <div className="flex items-center gap-3">
+                <Phone className="w-5 h-5 text-sky-300 shrink-0" />
+                <span>+91 44 6616 8888 (Ext. 200)</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Mail className="w-5 h-5 text-sky-300 shrink-0" />
+                <span>playsmart.support@tcs.com</span>
+              </div>
             </div>
           </div>
         </div>

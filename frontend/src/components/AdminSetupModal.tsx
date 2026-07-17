@@ -39,8 +39,9 @@ export default function AdminSetupModal({ isOpen, onClose, onSuccess }: AdminSet
       setError('Full Name is required.');
       return;
     }
-    if (!email.trim() || !email.includes('@')) {
-      setError('Please provide a valid corporate email address.');
+    const emailLower = email.trim().toLowerCase();
+    if (!email.trim() || (!emailLower.endsWith('@tcs.com') && !emailLower.endsWith('@gmail.com'))) {
+      setError('Only TCS (@tcs.com) and Gmail (@gmail.com) email addresses are allowed.');
       return;
     }
     if (password.length < 6) {
@@ -73,29 +74,22 @@ export default function AdminSetupModal({ isOpen, onClose, onSuccess }: AdminSet
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto" id="admin_setup_modal">
-      <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto" id="admin_setup_modal">
+      <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 overflow-hidden shadow-2xl transform transition-all animate-scale-in text-slate-800 my-8">
+        <div className="bg-slate-900 px-6 py-4 flex items-center justify-between border-b border-slate-800 text-white">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-amber-400" />
+            <h3 className="text-sm font-bold tracking-tight uppercase">PlaySmart Admin Initializer</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-
-        <div className="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full border border-slate-100">
-          <div className="bg-slate-900 px-6 py-4 flex items-center justify-between border-b border-slate-800 text-white">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-amber-400" />
-              <h3 className="text-sm font-bold tracking-tight uppercase">PlaySmart Admin Initializer</h3>
-            </div>
-            <button
-              onClick={onClose}
-              className="text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
             <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-xs text-amber-800 leading-relaxed">
               <strong>🔒 One-Time Setup:</strong> This utility is only available when no administrator account is present in local storage. Once configured, this panel cannot be accessed again.
             </div>
@@ -269,6 +263,5 @@ export default function AdminSetupModal({ isOpen, onClose, onSuccess }: AdminSet
           </form>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }

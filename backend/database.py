@@ -1,5 +1,6 @@
 import os
 import datetime
+import json
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
@@ -58,6 +59,7 @@ class DBBooking(Base):
     booking_source = Column(String, nullable=False)  # online, security
     status = Column(String, default="confirmed")  # confirmed, checked_in, no_show, cancelled
     created_at = Column(String, default=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+    additional_players = Column(String, nullable=True)  # Store as JSON string
 
 class DBWaitlist(Base):
     __tablename__ = "waitlist"
@@ -103,6 +105,17 @@ def init_sqlite_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        # Run migration check for additional_players column
+        from sqlalchemy import text
+        try:
+            db.execute(text("SELECT additional_players FROM bookings LIMIT 1"))
+        except Exception:
+            try:
+                db.execute(text("ALTER TABLE bookings ADD COLUMN additional_players TEXT"))
+                db.commit()
+            except Exception as e:
+                print(f"Migration error: {e}")
+
         # Seed default facilities if empty
         if db.query(DBFacility).count() == 0:
             facilities = [
@@ -380,22 +393,39 @@ class DatabaseManager:
             for b in bookings:
                 supabase_client.table("bookings").update({"status": "cancelled"}).eq("booking_id", b["booking_id"]).execute()
                 
-                # Add alert notification
-                self.add_notification({
-                    "employeeId": b["employee_id"],
-                    "title": "Facility Maintenance: Slot Cancelled ⚠️",
-                    "message": f"Your booking for {b['sport']} ({b['court_name']}) at {b['slot_time']} was cancelled because the facility was put under maintenance.",
-                    "type": "error"
-                })
+                # Build players list
+                all_players = [{"employeeId": b["employee_id"], "name": b["employee_name"]}]
+                if b.get("additional_players"):
+                    try:
+                        ap_list = json.loads(b["additional_players"])
+                        for ap in ap_list:
+                            all_players.append(ap)
+                    except Exception:
+                        pass
                 
-                # SMTP Email Trigger
-                email_subject = f"TCS PlaySmart - Booking Cancelled due to Facility Maintenance [{b['booking_id']}] ⚠️"
-                email_body = f"Dear {b['employee_name']},\n\nYour sports booking reservation on PlaySmart has been cancelled because the facility has been put under emergency maintenance.\n\nCancelled Booking Details:\n- Booking ID: {b['booking_id']}\n- Sport Category: {b['sport']}\n- Court / Board: {b['court_name']}\n- Cancelled Time Slot: {b['slot_time']}\n\nWe apologize for the inconvenience. Please select another court or time slot.\n\nBest Regards,\nTCS PlaySmart Admin Team"
-                
-                # Fetch user email
-                user_res = supabase_client.table("users").select("email").eq("employee_id", b["employee_id"]).execute()
-                email_to = user_res.data[0]["email"] if user_res.data else f"{b['employee_id'].lower()}@tcs.com"
-                self.send_simulated_email(email_to, email_subject, email_body)
+                for p_user in all_players:
+                    p_emp = p_user["employeeId"]
+                    p_name = p_user["name"]
+                    
+                    self.add_notification({
+                        "employeeId": p_emp,
+                        "title": "Facility Maintenance: Slot Cancelled ⚠️",
+                        "message": f"Your booking for {b['sport']} ({b['court_name']}) at {b['slot_time']} was cancelled because the facility was put under maintenance.",
+                        "type": "error"
+                    })
+                    
+                    email_subject = f"TCS PlaySmart - Booking Cancelled due to Facility Maintenance [{b['booking_id']}] ⚠️"
+                    email_body = f"Dear {p_name},\n\nYour sports booking reservation on PlaySmart has been cancelled because the facility has been put under emergency maintenance.\n\nCancelled Booking Details:\n- Booking ID: {b['booking_id']}\n- Sport Category: {b['sport']}\n- Court / Board: {b['court_name']}\n- Cancelled Time Slot: {b['slot_time']}\n"
+                    
+                    if b["sport"] == "Badminton":
+                        players_list_str = "\n".join([f"  - Player {i+1}: {pl['name']} ({pl['employeeId']})" for i, pl in enumerate(all_players)])
+                        email_body += f"\nPlayers in this Match:\n{players_list_str}\n"
+                        
+                    email_body += f"\nWe apologize for the inconvenience. Please select another court or time slot.\n\nBest Regards,\nTCS PlaySmart Admin Team"
+                    
+                    user_res = supabase_client.table("users").select("email").eq("employee_id", p_emp).execute()
+                    email_to = user_res.data[0]["email"] if user_res.data else f"{p_emp.lower()}@tcs.com"
+                    self.send_simulated_email(email_to, email_subject, email_body)
         else:
             db = SessionLocal()
             try:
@@ -407,19 +437,38 @@ class DatabaseManager:
                     b.status = "cancelled"
                     db.commit()
                     
-                    self.add_notification({
-                        "employeeId": b.employee_id,
-                        "title": "Facility Maintenance: Slot Cancelled ⚠️",
-                        "message": f"Your booking for {b.sport} ({b.court_name}) at {b.slot_time} was cancelled because the facility was put under maintenance.",
-                        "type": "error"
-                    })
-                    
-                    email_subject = f"TCS PlaySmart - Booking Cancelled due to Facility Maintenance [{b.booking_id}] ⚠️"
-                    email_body = f"Dear {b.employee_name},\n\nYour sports booking reservation on PlaySmart has been cancelled because the facility has been put under emergency maintenance.\n\nCancelled Booking Details:\n- Booking ID: {b.booking_id}\n- Sport Category: {b.sport}\n- Court / Board: {b.court_name}\n- Cancelled Time Slot: {b.slot_time}\n\nWe apologize for the inconvenience. Please select another court or time slot.\n\nBest Regards,\nTCS PlaySmart Admin Team"
-                    
-                    u = db.query(DBUser).filter_by(employee_id=b.employee_id).first()
-                    email_to = u.email if u else f"{b.employee_id.lower()}@tcs.com"
-                    self.send_simulated_email(email_to, email_subject, email_body)
+                    all_players = [{"employeeId": b.employee_id, "name": b.employee_name}]
+                    if b.additional_players:
+                        try:
+                            ap_list = json.loads(b.additional_players)
+                            for ap in ap_list:
+                                all_players.append(ap)
+                        except Exception:
+                            pass
+                            
+                    for p_user in all_players:
+                        p_emp = p_user["employeeId"]
+                        p_name = p_user["name"]
+                        
+                        self.add_notification({
+                            "employeeId": p_emp,
+                            "title": "Facility Maintenance: Slot Cancelled ⚠️",
+                            "message": f"Your booking for {b.sport} ({b.court_name}) at {b.slot_time} was cancelled because the facility was put under maintenance.",
+                            "type": "error"
+                        })
+                        
+                        email_subject = f"TCS PlaySmart - Booking Cancelled due to Facility Maintenance [{b.booking_id}] ⚠️"
+                        email_body = f"Dear {p_name},\n\nYour sports booking reservation on PlaySmart has been cancelled because the facility has been put under emergency maintenance.\n\nCancelled Booking Details:\n- Booking ID: {b.booking_id}\n- Sport Category: {b.sport}\n- Court / Board: {b.court_name}\n- Cancelled Time Slot: {b.slot_time}\n"
+                        
+                        if b.sport == "Badminton":
+                            players_list_str = "\n".join([f"  - Player {i+1}: {pl['name']} ({pl['employeeId']})" for i, pl in enumerate(all_players)])
+                            email_body += f"\nPlayers in this Match:\n{players_list_str}\n"
+                            
+                        email_body += f"\nWe apologize for the inconvenience. Please select another court or time slot.\n\nBest Regards,\nTCS PlaySmart Admin Team"
+                        
+                        u = db.query(DBUser).filter_by(employee_id=p_emp).first()
+                        email_to = u.email if u else f"{p_emp.lower()}@tcs.com"
+                        self.send_simulated_email(email_to, email_subject, email_body)
             finally:
                 db.close()
 
@@ -434,7 +483,8 @@ class DatabaseManager:
                     "bookingId": b["booking_id"], "employeeId": b["employee_id"], "employeeName": b["employee_name"],
                     "facilityId": b["facility_id"], "sport": b["sport"], "courtName": b["court_name"],
                     "slotTime": b["slot_time"], "bookingSource": b["booking_source"], "status": b["status"],
-                    "createdAt": b["created_at"]
+                    "createdAt": b["created_at"],
+                    "additionalPlayers": json.loads(b["additional_players"]) if b.get("additional_players") else []
                 }
                 for b in bookings
             ]
@@ -447,7 +497,8 @@ class DatabaseManager:
                         "bookingId": b.booking_id, "employeeId": b.employee_id, "employeeName": b.employee_name,
                         "facilityId": b.facility_id, "sport": b.sport, "courtName": b.court_name,
                         "slotTime": b.slot_time, "bookingSource": b.booking_source, "status": b.status,
-                        "createdAt": b.created_at
+                        "createdAt": b.created_at,
+                    "additionalPlayers": json.loads(b.additional_players) if b.additional_players else []
                     }
                     for b in books
                 ]
@@ -461,7 +512,15 @@ class DatabaseManager:
         slot_time = booking_data["slotTime"]
         source = booking_data["bookingSource"]
 
-        # 1. Validate employee
+        # 1. Validate Facility status
+        facilities = self.get_facilities()
+        facility = next((f for f in facilities if f["facilityId"] == facility_id), None)
+        if not facility:
+            return {"success": False, "error": "Facility not found."}
+        if facility["status"] == "maintenance":
+            return {"success": False, "error": f"{facility['sport']} {facility['courtName']} is under maintenance and cannot be booked."}
+
+        # 2. Validate primary employee
         employee = self.get_user_by_employee_id(emp_id)
         if not employee:
             if email:
@@ -484,37 +543,67 @@ class DatabaseManager:
         elif email and employee["email"].lower() != email:
             return {"success": False, "error": f"The provided Email ID does not match the registered Email for Employee ID {emp_id}."}
 
-        # 2. Validate Facility status
-        facilities = self.get_facilities()
-        facility = next((f for f in facilities if f["facilityId"] == facility_id), None)
-        if not facility:
-            return {"success": False, "error": "Facility not found."}
-        if facility["status"] == "maintenance":
-            return {"success": False, "error": f"{facility['sport']} {facility['courtName']} is under maintenance and cannot be booked."}
-
-        # 3. Check booking rules & window bypass for Admins
-        # Use real current time instead of simulated time
-        now = datetime.datetime.now()
-        current_hour = now.hour
+        # 3. Validate additional players for Badminton
+        all_players = [employee]
+        additional_players_list = []
         
-        # Admin bypass check
+        if facility["sport"] == "Badminton":
+            additional = booking_data.get("additionalPlayers") or []
+            if len(additional) != 3:
+                return {"success": False, "error": "Badminton bookings require exactly 4 players. Please provide details for the other 3 players."}
+                
+            # Check unique employee IDs
+            all_emp_ids = [emp_id] + [p["employeeId"].strip().upper() for p in additional]
+            if len(set(all_emp_ids)) < 4:
+                return {"success": False, "error": "All 4 players must have unique Employee IDs."}
+                
+            for idx, p in enumerate(additional):
+                p_emp_id = p["employeeId"].strip().upper()
+                p_name = p["name"].strip()
+                p_email = p["email"].strip().lower()
+                
+                if not p_emp_id or not p_name or not p_email:
+                    return {"success": False, "error": f"Player {idx + 2} details (Employee ID, Name, and Email) are required."}
+                    
+                p_user = self.get_user_by_employee_id(p_emp_id)
+                if not p_user:
+                    reg_res = self.register_user({
+                        "employeeId": p_emp_id,
+                        "name": p_name,
+                        "email": p_email,
+                        "phoneNumber": "",
+                        "department": "BFSI",
+                        "businessUnit": "BU_TCS_CHN",
+                        "role": "employee"
+                    })
+                    if reg_res["success"]:
+                        p_user = reg_res["user"]
+                    else:
+                        return {"success": False, "error": f"Failed to register Player {idx + 2} ({p_emp_id}): {reg_res.get('error')}"}
+                elif p_user["email"].lower() != p_email:
+                    return {"success": False, "error": f"The provided Email for Player {idx + 2} ({p_emp_id}) does not match their registered Email ({p_user['email']})."}
+                
+                all_players.append(p_user)
+                additional_players_list.append({
+                    "employeeId": p_user["employeeId"],
+                    "name": p_user["name"],
+                    "email": p_user["email"]
+                })
+
+        # 4. Check booking rules & window bypass for Admins
+        sim_time = self.get_simulated_time()
+        current_hour = sim_time["hour"]
         is_admin_override = employee["role"] == "admin"
         
         if not is_admin_override:
-            if source == "security":
-                if current_hour < 5 or current_hour >= 10:
-                    return {
-                        "success": False,
-                        "error": f"Security booking is frozen. The Security assisted booking window is active only from 5:00 AM to 10:00 AM."
-                    }
-            elif source == "online":
+            if source == "online":
                 if current_hour < 10 or current_hour >= 20:
                     return {
                         "success": False,
-                        "error": f"Online booking is closed. Employee Booking Window is active from 10:00 AM to 8:00 PM."
+                        "error": "Online booking is closed. Employee Booking Window is active from 10:00 AM to 8:00 PM."
                     }
 
-        # 4. Check double booking / overlapping
+        # 5. Check double booking / overlapping
         bookings = self.get_bookings()
         
         # Check if slot is already occupied
@@ -522,18 +611,35 @@ class DatabaseManager:
         if already_booked:
             return {"success": False, "error": "This slot is already reserved."}
 
-        # Overlapping slot check (same employee booked at same slot time in ANY sport)
-        overlap = next((b for b in bookings if b["employeeId"] == emp_id and b["slotTime"] == slot_time and b["status"] != "cancelled"), None)
-        if overlap:
-            return {"success": False, "error": f"{employee['name']} already has another booking at {slot_time}."}
+        # Overlapping and daily limit check helper
+        def player_in_booking(b, check_emp_id):
+            if b["employeeId"] == check_emp_id:
+                return True
+            add_p = b.get("additionalPlayers") or []
+            return any(ap["employeeId"] == check_emp_id for ap in add_p)
 
-        # Same sport daily limit check (PRD: max 1 active slot per sport per day)
-        sport_overlap = next((b for b in bookings if b["employeeId"] == emp_id and b["sport"] == facility["sport"] and b["status"] != "cancelled"), None)
-        if sport_overlap:
-            return {"success": False, "error": f"{employee['name']} already has an active booking for {facility['sport']} today. Employees are limited to one active booking per sport per day."}
+        for p_user in all_players:
+            p_emp = p_user["employeeId"]
+            p_name = p_user["name"]
+            
+            # Check overlap in any sport
+            overlap = next((b for b in bookings if player_in_booking(b, p_emp) and b["slotTime"] == slot_time and b["status"] != "cancelled"), None)
+            if overlap:
+                err_prefix = "You" if p_emp == emp_id else f"Player {p_name} ({p_emp})"
+                verb = "already have" if p_emp == emp_id else "already has"
+                return {"success": False, "error": f"{err_prefix} {verb} another booking at {slot_time}."}
+                
+            # Same sport daily limit check
+            sport_overlap = next((b for b in bookings if player_in_booking(b, p_emp) and b["sport"] == facility["sport"] and b["status"] != "cancelled"), None)
+            if sport_overlap:
+                err_prefix = "You" if p_emp == emp_id else f"Player {p_name} ({p_emp})"
+                verb = "already have" if p_emp == emp_id else "already has"
+                return {"success": False, "error": f"{err_prefix} {verb} an active booking for {facility['sport']} today. Employees are limited to one active booking per sport per day."}
 
-        # 5. Insert Booking
+        # 6. Insert Booking
         booking_id = f"b_{int(datetime.datetime.now().timestamp() * 1000)}"
+        serialized_players = json.dumps(additional_players_list) if additional_players_list else None
+        
         new_booking = {
             "booking_id": booking_id,
             "employee_id": emp_id,
@@ -544,7 +650,8 @@ class DatabaseManager:
             "slot_time": slot_time,
             "booking_source": source,
             "status": "confirmed",
-            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "additional_players": serialized_players
         }
 
         if USE_SUPABASE:
@@ -561,34 +668,68 @@ class DatabaseManager:
                     court_name=facility["courtName"],
                     slot_time=slot_time,
                     booking_source=source,
-                    status="confirmed"
+                    status="confirmed",
+                    additional_players=serialized_players
                 )
                 db.add(b)
                 db.commit()
             finally:
                 db.close()
 
-        # 6. Add local notification
-        self.add_notification({
-            "employeeId": emp_id,
-            "title": "Booking Confirmed 🎉",
-            "message": f"Your slot for {facility['sport']} ({facility['courtName']}) at {slot_time} has been successfully booked!",
-            "type": "success"
-        })
+        # 7. Add local notifications for all players
+        for p_user in all_players:
+            p_emp = p_user["employeeId"]
+            p_name = p_user["name"]
+            msg = f"Your slot for {facility['sport']} ({facility['courtName']}) at {slot_time} has been successfully booked!"
+            if facility["sport"] == "Badminton" and p_emp != emp_id:
+                msg = f"You have been added to a Badminton booking by {employee['name']} for {facility['courtName']} at {slot_time}."
+            
+            self.add_notification({
+                "employeeId": p_emp,
+                "title": "Booking Confirmed 🎉",
+                "message": msg,
+                "type": "success"
+            })
 
-        # 7. Simulated SMTP dispatcher outbox email trigger
-        email_to = employee["email"]
-        email_subject = f"TCS PlaySmart - Slot Booking Confirmed [{booking_id}] 🏸"
-        email_body = f"Dear {employee['name']},\n\nYour sports booking request on PlaySmart has been successfully confirmed!\n\nBooking Details:\n- Booking ID: {booking_id}\n- Sport Category: {facility['sport']}\n- Court / Board: {facility['courtName']}\n- Reserved Time Slot: {slot_time}\n- Booking Channel: {source.capitalize()} Booking\n- Booking Time: {now.strftime('%I:%M %p')}\n\nPlease present your simulated QR Gate Pass at the court check-in checkpoint.\n\nEnjoy your active session!\n\nBest Regards,\nTCS PlaySmart Admin Team"
-        self.send_simulated_email(email_to, email_subject, email_body)
+        # 8. Simulated SMTP dispatcher outbox email trigger for all players
+        now = datetime.datetime.now()
+        for p_user in all_players:
+            p_emp = p_user["employeeId"]
+            p_name = p_user["name"]
+            p_email = p_user["email"]
+            
+            email_subject = f"TCS PlaySmart - Slot Booking Confirmed [{booking_id}] 🏸"
+            
+            # Custom message body depending on who booked it
+            if facility["sport"] == "Badminton" and p_emp != emp_id:
+                salutation = f"Dear {p_name},\n\nGood news! {employee['name']} has successfully booked a Badminton slot and included you as a player!\n\n"
+            else:
+                salutation = f"Dear {p_name},\n\nYour sports booking request on PlaySmart has been successfully confirmed!\n\n"
+                
+            email_body = salutation + f"Booking Details:\n- Booking ID: {booking_id}\n- Sport Category: {facility['sport']}\n- Court / Board: {facility['courtName']}\n- Reserved Time Slot: {slot_time}\n- Booking Channel: {source.capitalize()} Booking\n- Booking Time: {now.strftime('%I:%M %p')}\n"
+            
+            if facility["sport"] == "Badminton":
+                players_list_str = "\n".join([f"  - Player {i+1}: {pl['name']} ({pl['employeeId']})" for i, pl in enumerate(all_players)])
+                email_body += f"\nPlayers in this Match:\n{players_list_str}\n"
+                
+            email_body += f"\nPlease present your simulated QR Gate Pass at the court check-in checkpoint.\n\nEnjoy your active session!\n\nBest Regards,\nTCS PlaySmart Admin Team"
+            
+            self.send_simulated_email(p_email, email_subject, email_body)
 
         # Convert back camelCase for response
         return {
             "success": True,
             "booking": {
-                "bookingId": booking_id, "employeeId": emp_id, "employeeName": employee["name"],
-                "facilityId": facility_id, "sport": facility["sport"], "courtName": facility["courtName"],
-                "slotTime": slot_time, "bookingSource": source, "status": "confirmed"
+                "bookingId": booking_id,
+                "employeeId": emp_id,
+                "employeeName": employee["name"],
+                "facilityId": facility_id,
+                "sport": facility["sport"],
+                "courtName": facility["courtName"],
+                "slotTime": slot_time,
+                "bookingSource": source,
+                "status": "confirmed",
+                "additionalPlayers": additional_players_list
             }
         }
 
@@ -597,16 +738,34 @@ class DatabaseManager:
         booking = None
         if USE_SUPABASE:
             res = supabase_client.table("bookings").select("*").eq("booking_id", booking_id).execute()
-            if res.data: booking = res.data[0]
+            if res.data:
+                b = res.data[0]
+                booking = {
+                    "booking_id": b["booking_id"],
+                    "employee_id": b["employee_id"],
+                    "employee_name": b["employee_name"],
+                    "facility_id": b["facility_id"],
+                    "sport": b["sport"],
+                    "court_name": b["court_name"],
+                    "slot_time": b["slot_time"],
+                    "status": b["status"],
+                    "additional_players": json.loads(b["additional_players"]) if b.get("additional_players") else []
+                }
         else:
             db = SessionLocal()
             try:
                 b = db.query(DBBooking).filter_by(booking_id=booking_id).first()
                 if b:
                     booking = {
-                        "booking_id": b.booking_id, "employee_id": b.employee_id, "employee_name": b.employee_name,
-                        "facility_id": b.facility_id, "sport": b.sport, "court_name": b.court_name,
-                        "slot_time": b.slot_time, "status": b.status
+                        "booking_id": b.booking_id,
+                        "employee_id": b.employee_id,
+                        "employee_name": b.employee_name,
+                        "facility_id": b.facility_id,
+                        "sport": b.sport,
+                        "court_name": b.court_name,
+                        "slot_time": b.slot_time,
+                        "status": b.status,
+                        "additional_players": json.loads(b.additional_players) if b.additional_players else []
                     }
             finally:
                 db.close()
@@ -629,20 +788,40 @@ class DatabaseManager:
             finally:
                 db.close()
 
-        # Add cancel notification
-        self.add_notification({
+        # Build list of all players to notify
+        all_players = [{
             "employeeId": booking["employee_id"],
-            "title": "Booking Cancelled 🔴",
-            "message": f"Your booking for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']} was cancelled.",
-            "type": "warning"
-        })
+            "name": booking["employee_name"]
+        }]
+        for ap in booking.get("additional_players") or []:
+            all_players.append({
+                "employeeId": ap["employeeId"],
+                "name": ap["name"]
+            })
 
-        # Send SMTP cancellation email
-        u = self.get_user_by_employee_id(booking["employee_id"])
-        email_to = u["email"] if u else f"{booking['employee_id'].lower()}@tcs.com"
-        email_subject = f"TCS PlaySmart - Slot Booking Cancelled [{booking_id}] 🔴"
-        email_body = f"Dear {booking['employee_name']},\n\nYour sports booking reservation on PlaySmart has been successfully cancelled.\n\nCancelled Booking Details:\n- Booking ID: {booking_id}\n- Sport Category: {booking['sport']}\n- Court / Board: {booking['court_name']}\n- Cancelled Time Slot: {booking['slot_time']}\n\nIf you did not request this cancellation, please contact the PlaySmart Administrator.\n\nBest Regards,\nTCS PlaySmart Admin Team"
-        self.send_simulated_email(email_to, email_subject, email_body)
+        # Add cancel notification and send cancellation email to all players
+        for p_user in all_players:
+            p_emp = p_user["employeeId"]
+            p_name = p_user["name"]
+            
+            self.add_notification({
+                "employeeId": p_emp,
+                "title": "Booking Cancelled 🔴",
+                "message": f"Your booking for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']} was cancelled.",
+                "type": "warning"
+            })
+
+            u = self.get_user_by_employee_id(p_emp)
+            email_to = u["email"] if u else f"{p_emp.lower()}@tcs.com"
+            email_subject = f"TCS PlaySmart - Slot Booking Cancelled [{booking_id}] 🔴"
+            email_body = f"Dear {p_name},\n\nYour sports booking reservation on PlaySmart has been successfully cancelled.\n\nCancelled Booking Details:\n- Booking ID: {booking_id}\n- Sport Category: {booking['sport']}\n- Court / Board: {booking['court_name']}\n- Cancelled Time Slot: {booking['slot_time']}\n"
+            
+            if booking["sport"] == "Badminton":
+                players_list_str = "\n".join([f"  - Player {i+1}: {pl['name']} ({pl['employeeId']})" for i, pl in enumerate(all_players)])
+                email_body += f"\nPlayers in this Match:\n{players_list_str}\n"
+
+            email_body += f"\nIf you did not request this cancellation, please contact the PlaySmart Administrator.\n\nBest Regards,\nTCS PlaySmart Admin Team"
+            self.send_simulated_email(email_to, email_subject, email_body)
 
         # Trigger auto promotion
         self.process_waitlist_promotion(booking["facility_id"], booking["slot_time"])
@@ -654,16 +833,34 @@ class DatabaseManager:
         booking = None
         if USE_SUPABASE:
             res = supabase_client.table("bookings").select("*").eq("booking_id", booking_id).execute()
-            if res.data: booking = res.data[0]
+            if res.data:
+                b = res.data[0]
+                booking = {
+                    "booking_id": b["booking_id"],
+                    "employee_id": b["employee_id"],
+                    "employee_name": b["employee_name"],
+                    "facility_id": b["facility_id"],
+                    "sport": b["sport"],
+                    "court_name": b["court_name"],
+                    "slot_time": b["slot_time"],
+                    "status": b["status"],
+                    "additional_players": json.loads(b["additional_players"]) if b.get("additional_players") else []
+                }
         else:
             db = SessionLocal()
             try:
                 b = db.query(DBBooking).filter_by(booking_id=booking_id).first()
                 if b:
                     booking = {
-                        "booking_id": b.booking_id, "employee_id": b.employee_id, "employee_name": b.employee_name,
-                        "facility_id": b.facility_id, "sport": b.sport, "court_name": b.court_name,
-                        "slot_time": b.slot_time, "status": b.status
+                        "booking_id": b.booking_id,
+                        "employee_id": b.employee_id,
+                        "employee_name": b.employee_name,
+                        "facility_id": b.facility_id,
+                        "sport": b.sport,
+                        "court_name": b.court_name,
+                        "slot_time": b.slot_time,
+                        "status": b.status,
+                        "additional_players": json.loads(b.additional_players) if b.additional_players else []
                     }
             finally:
                 db.close()
@@ -683,28 +880,42 @@ class DatabaseManager:
             finally:
                 db.close()
 
-        # Handle check-in and no-show alerts
+        # Build list of all players to notify
+        all_players = [{
+            "employeeId": booking["employee_id"],
+            "name": booking["employee_name"]
+        }]
+        for ap in booking.get("additional_players") or []:
+            all_players.append({
+                "employeeId": ap["employeeId"],
+                "name": ap["name"]
+            })
+
+        # Handle check-in and no-show alerts for all players
         if status == "checked_in":
-            self.add_notification({
-                "employeeId": booking["employee_id"],
-                "title": "Attendance Verified ✅",
-                "message": f"Enjoy your game of {booking['sport']}! Your entry has been verified at check gate by Security {verified_by}.",
-                "type": "success"
-            })
+            for p_user in all_players:
+                self.add_notification({
+                    "employeeId": p_user["employeeId"],
+                    "title": "Attendance Verified ✅",
+                    "message": f"Enjoy your game of {booking['sport']}! Your entry has been verified at check gate by Security {verified_by}.",
+                    "type": "success"
+                })
         elif status == "no_show":
-            self.add_notification({
-                "employeeId": booking["employee_id"],
-                "title": "Marked as No-Show ⚠️",
-                "message": f"You were marked as a no-show for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']}.",
-                "type": "error"
-            })
+            for p_user in all_players:
+                self.add_notification({
+                    "employeeId": p_user["employeeId"],
+                    "title": "Marked as No-Show ⚠️",
+                    "message": f"You were marked as a no-show for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']}.",
+                    "type": "error"
+                })
         elif status == "cancelled" and previous_status != "cancelled":
-            self.add_notification({
-                "employeeId": booking["employee_id"],
-                "title": "Booking Cancelled 🔴",
-                "message": f"Your booking for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']} was cancelled.",
-                "type": "warning"
-            })
+            for p_user in all_players:
+                self.add_notification({
+                    "employeeId": p_user["employeeId"],
+                    "title": "Booking Cancelled 🔴",
+                    "message": f"Your booking for {booking['sport']} ({booking['court_name']}) at {booking['slot_time']} was cancelled.",
+                    "type": "warning"
+                })
             self.process_waitlist_promotion(booking["facility_id"], booking["slot_time"])
 
         return {"success": True}
@@ -1065,11 +1276,11 @@ class DatabaseManager:
             try:
                 result = send_email(to, subject, body)
                 if result.get("success"):
-                    print(f"✅ Real email sent to {to}")
+                    print(f"[SUCCESS] Real email sent to {to}")
                 else:
-                    print(f"⚠️ Failed to send real email: {result.get('error')}")
+                    print(f"[ERROR] Failed to send real email: {result.get('error')}")
             except Exception as e:
-                print(f"⚠️ Email service error: {e}")
+                print(f"[ERROR] Email service error: {e}")
 
     def clear_simulated_emails(self) -> bool:
         if USE_SUPABASE:
@@ -1083,6 +1294,54 @@ class DatabaseManager:
                 return True
             finally:
                 db.close()
+
+    def forgot_password(self, employee_id: str) -> Dict[str, Any]:
+        emp_id = employee_id.strip().upper()
+        
+        # 1. Fetch user by employee_id
+        if USE_SUPABASE:
+            res = supabase_client.table("users").select("*").eq("employee_id", emp_id).execute()
+            if not res.data or len(res.data) == 0:
+                return {"success": False, "error": f"No registered account matches Employee ID {emp_id}."}
+            user = res.data[0]
+        else:
+            db = SessionLocal()
+            try:
+                u = db.query(DBUser).filter_by(employee_id=emp_id).first()
+                if not u:
+                    return {"success": False, "error": f"No registered account matches Employee ID {emp_id}."}
+                user = {
+                    "id": u.id, "employee_id": u.employee_id, "name": u.name, "email": u.email,
+                    "phone_number": u.phone_number, "department": u.department, 
+                    "business_unit": u.business_unit, "role": u.role, "password": u.password
+                }
+            finally:
+                db.close()
+                
+        # 2. Reset password to default 'password'
+        temp_pwd = "password"
+        
+        # 3. Update database
+        if USE_SUPABASE:
+            supabase_client.table("users").update({"password": temp_pwd}).eq("employee_id", emp_id).execute()
+        else:
+            db = SessionLocal()
+            try:
+                u = db.query(DBUser).filter_by(employee_id=emp_id).first()
+                if u:
+                    u.password = temp_pwd
+                    db.commit()
+            finally:
+                db.close()
+                
+        # 4. Trigger simulated email
+        email_to = user["email"]
+        email_subject = "TCS PlaySmart - Password Recovery request 🔑"
+        email_body = f"Dear {user['name']},\n\nWe received a request to recover your password for the TCS PlaySmart sports reservation system.\n\nYour password has been reset to the default developer bypass password:\n- Temporary Password: password\n\nPlease log in and update your profile password as soon as possible.\n\nBest Regards,\nTCS PlaySmart Admin Team"
+        self.send_simulated_email(email_to, email_subject, email_body)
+        
+        # Dispatch local event so header outbox registers it immediately
+        return {"success": True, "message": f"Password reset email sent to {email_to}."}
 
 # Singleton DB Manager instance
 db_mgr = DatabaseManager()
