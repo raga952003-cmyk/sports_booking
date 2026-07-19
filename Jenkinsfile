@@ -15,8 +15,8 @@ pipeline {
                         mkdir -p "$WORKSPACE/node-bin"
                         if [ ! -f "$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin/npm" ]; then
                             echo "Downloading Node.js binary (v18.20.2 Linux x64)..."
-                            curl -sSLo "$WORKSPACE/node-bin/node.tar.xz" https://nodejs.org/dist/v18.20.2/node-v18.20.2-linux-x64.tar.xz
-                            tar -xf "$WORKSPACE/node-bin/node.tar.xz" -C "$WORKSPACE/node-bin"
+                            curl -sSLo "$WORKSPACE/node-bin/node.tar.gz" https://nodejs.org/dist/v18.20.2/node-v18.20.2-linux-x64.tar.gz
+                            tar -xf "$WORKSPACE/node-bin/node.tar.gz" -C "$WORKSPACE/node-bin"
                         fi
                     else
                         echo "Global npm is already available."
