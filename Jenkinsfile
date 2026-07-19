@@ -1,23 +1,39 @@
 pipeline {
     agent any
 
-    tools {
-        // This ensures Node.js is automatically added to the PATH.
-        // Make sure to define a Node.js tool named 'node' in:
-        // Jenkins -> Manage Jenkins -> Tools (or Global Tool Configuration)
-        nodejs 'node'
-    }
-
     environment {
         FRONTEND_DIR = 'frontend'
         BACKEND_DIR = 'backend'
     }
 
     stages {
+        stage('Frontend - Setup Node.js') {
+            steps {
+                sh '''
+                    if ! command -v npm &> /dev/null; then
+                        echo "Global npm not found. Setting up portable NodeJS..."
+                        mkdir -p "$WORKSPACE/node-bin"
+                        if [ ! -f "$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin/npm" ]; then
+                            echo "Downloading Node.js binary (v18.20.2 Linux x64)..."
+                            curl -sSLo "$WORKSPACE/node-bin/node.tar.xz" https://nodejs.org/dist/v18.20.2/node-v18.20.2-linux-x64.tar.xz
+                            tar -xf "$WORKSPACE/node-bin/node.tar.xz" -C "$WORKSPACE/node-bin"
+                        fi
+                    else
+                        echo "Global npm is already available."
+                    fi
+                '''
+            }
+        }
+
         stage('Frontend - Install Dependencies') {
             steps {
                 dir("${env.FRONTEND_DIR}") {
-                    sh 'npm ci || npm install'
+                    sh '''
+                        if [ -d "$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin" ]; then
+                            export PATH="$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin:$PATH"
+                        fi
+                        npm ci || npm install
+                    '''
                 }
             }
         }
@@ -25,7 +41,12 @@ pipeline {
         stage('Frontend - Lint & Typecheck') {
             steps {
                 dir("${env.FRONTEND_DIR}") {
-                    sh 'npm run lint'
+                    sh '''
+                        if [ -d "$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin" ]; then
+                            export PATH="$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin:$PATH"
+                        fi
+                        npm run lint
+                    '''
                 }
             }
         }
@@ -33,7 +54,12 @@ pipeline {
         stage('Frontend - Build') {
             steps {
                 dir("${env.FRONTEND_DIR}") {
-                    sh 'npm run build'
+                    sh '''
+                        if [ -d "$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin" ]; then
+                            export PATH="$WORKSPACE/node-bin/node-v18.20.2-linux-x64/bin:$PATH"
+                        fi
+                        npm run build
+                    '''
                 }
             }
         }
@@ -77,4 +103,5 @@ pipeline {
         }
     }
 }
+
 
