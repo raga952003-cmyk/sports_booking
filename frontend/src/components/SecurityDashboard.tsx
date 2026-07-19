@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../lib/database';
 import { User, Booking, Facility, SlotTime, SportType } from '../types';
 import { SLOT_TIMES } from '../data/initialData';
-import { Shield, Search, QrCode, UserCheck, XOctagon, Calendar, CheckSquare, RefreshCw, AlertTriangle, Play, HelpCircle, Camera, Check, CheckCircle2, AlertCircle, ArrowLeft, X, Printer, Sparkles } from 'lucide-react';
+import { Shield, Search, QrCode, UserCheck, XOctagon, Calendar, CheckSquare, RefreshCw, AlertTriangle, Play, HelpCircle, Camera, Check, CheckCircle2, AlertCircle, ArrowLeft, X, Printer, Sparkles, Download } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 import QRCodeSVG from './QRCodeSVG';
 const THEMES = {

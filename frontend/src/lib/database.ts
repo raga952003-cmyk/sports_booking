@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { User, Facility, Booking, Notification, SlotTime, SportType, BookingStatus, Attendance, WaitlistEntry } from '../types';
+import { User, Facility, Booking, Notification, SlotTime, SportType, BookingStatus, Attendance, WaitlistEntry, BookingSource } from '../types';
 
 // fallback for sandbox environment
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://kmcecytuzizhiokvwnlq.supabase.co';
